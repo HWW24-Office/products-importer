@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.0.0
+// @version      1.1.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -224,32 +224,21 @@
     document.body.insertAdjacentHTML('beforeend', modalHTML);
 
     // ============================================
-    // NAVIGATION BUTTON EINFUEGEN
+    // FLOATING BUTTON (nur im Products-Modul)
     // ============================================
-    function addNavButton() {
-        // Versuche verschiedene VTiger-Navigations-Selektoren
-        const navSelectors = [
-            '.navbar-nav',
-            '.nav.navbar-nav',
-            '#navbar',
-            '.navbar',
-            '.menu',
-            '#menu'
-        ];
-
-        let navContainer = null;
-        for (const selector of navSelectors) {
-            navContainer = document.querySelector(selector);
-            if (navContainer) break;
+    function addFloatingButton() {
+        // Pruefen ob wir im Products-Modul sind
+        function isProductsModule() {
+            const url = window.location.href.toLowerCase();
+            return url.includes('module=products') ||
+                   url.includes('module%3dproducts') ||
+                   url.includes('/products/');
         }
 
-        if (navContainer) {
-            // Als Navigations-Item einfuegen
-            const navItem = document.createElement('li');
-            navItem.innerHTML = `<a href="#" id="open-importer-btn" style="cursor:pointer;">Importer</a>`;
-            navContainer.appendChild(navItem);
-        } else {
-            // Fallback: Floating Button
+        // Button erstellen
+        function createButton() {
+            if (document.getElementById('open-importer-btn')) return; // Bereits vorhanden
+
             const floatBtn = document.createElement('button');
             floatBtn.id = 'open-importer-btn';
             floatBtn.textContent = 'Importer';
@@ -266,20 +255,52 @@
                 cursor: pointer;
                 font-size: 14px;
                 box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                transition: background 0.2s, transform 0.2s;
             `;
+            floatBtn.addEventListener('mouseenter', () => {
+                floatBtn.style.background = '#166c79';
+                floatBtn.style.transform = 'scale(1.05)';
+            });
+            floatBtn.addEventListener('mouseleave', () => {
+                floatBtn.style.background = '#1d8d9f';
+                floatBtn.style.transform = 'scale(1)';
+            });
+            floatBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                openModal();
+            });
             document.body.appendChild(floatBtn);
         }
 
-        // Event Listener
-        setTimeout(() => {
+        // Button entfernen
+        function removeButton() {
             const btn = document.getElementById('open-importer-btn');
-            if (btn) {
-                btn.addEventListener('click', (e) => {
-                    e.preventDefault();
-                    openModal();
-                });
+            if (btn) btn.remove();
+        }
+
+        // Button anzeigen/verstecken basierend auf Modul
+        function updateButtonVisibility() {
+            if (isProductsModule()) {
+                createButton();
+            } else {
+                removeButton();
             }
-        }, 100);
+        }
+
+        // Initial pruefen
+        updateButtonVisibility();
+
+        // Bei URL-Aenderungen pruefen (fuer Single-Page-Navigation)
+        let lastUrl = location.href;
+        new MutationObserver(() => {
+            if (location.href !== lastUrl) {
+                lastUrl = location.href;
+                updateButtonVisibility();
+            }
+        }).observe(document.body, { subtree: true, childList: true });
+
+        // Auch auf popstate hoeren (Browser-Navigation)
+        window.addEventListener('popstate', updateButtonVisibility);
     }
 
     // ============================================
@@ -1447,7 +1468,7 @@
     // INITIALISIERUNG
     // ============================================
     function init() {
-        addNavButton();
+        addFloatingButton();
         initAxians();
         initTechnogroup();
         initTechnogroupPDF();
