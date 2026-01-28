@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.2.0
+// @version      1.2.1
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -1541,178 +1541,155 @@
             const arrayBuffer = await file.arrayBuffer();
             const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-            let allItems = [];
+            // Text zeilenweise extrahieren mit y-Koordinaten
+            let allLines = [];
 
             for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
                 const page = await pdf.getPage(pageNum);
                 const content = await page.getTextContent();
                 const items = content.items;
 
-                // Gruppieren nach y-Koordinate fuer Zeilenerkennung
-                const lines = {};
+                // Gruppieren nach y-Koordinate
+                const lineMap = {};
                 items.forEach(item => {
-                    const [,,,, x, y] = item.transform;
-                    const yKey = Math.round(y);
-                    if (!lines[yKey]) lines[yKey] = [];
-                    lines[yKey].push({ x: Math.round(x), str: item.str.trim() });
+                    const y = Math.round(item.transform[5]);
+                    const x = Math.round(item.transform[4]);
+                    if (!lineMap[y]) lineMap[y] = [];
+                    lineMap[y].push({ x, text: item.str });
                 });
 
-                // Zeilen sortieren (von oben nach unten)
-                const sortedYKeys = Object.keys(lines).map(k => parseInt(k)).sort((a, b) => b - a);
-
-                sortedYKeys.forEach(yKey => {
-                    const lineItems = lines[yKey].sort((a, b) => a.x - b.x);
-                    const lineText = lineItems.map(i => i.str).join(' ');
-                    allItems.push({ y: yKey, items: lineItems, text: lineText });
-                });
+                // Zeilen sortieren und zusammenfuegen
+                Object.keys(lineMap)
+                    .map(Number)
+                    .sort((a, b) => b - a)
+                    .forEach(y => {
+                        const lineItems = lineMap[y].sort((a, b) => a.x - b.x);
+                        const lineText = lineItems.map(i => i.text).join(' ').trim();
+                        if (lineText) allLines.push(lineText);
+                    });
             }
 
-            // Header-Zeile finden
-            let headerIndex = -1;
-            for (let i = 0; i < allItems.length; i++) {
-                const text = allItems[i].text.toUpperCase();
-                if (text.includes('LINE') && text.includes('OEM') && text.includes('PRODUCT')) {
-                    headerIndex = i;
-                    break;
-                }
-            }
+            console.log('Extrahierte Zeilen:', allLines);
 
-            if (headerIndex === -1) {
-                alert('Konnte Tabellen-Header nicht finden.');
-                return;
-            }
+            // Bekannte OEMs
+            const knownOEMs = ['NetApp', 'Dell', 'HP', 'HPE', 'IBM', 'Cisco', 'EMC', 'Fujitsu', 'Lenovo', 'Sun', 'Oracle', 'Hitachi', 'Pure Storage', 'Nimble'];
 
-            // Spalten-Positionen aus Header ermitteln
-            const headerItems = allItems[headerIndex].items;
-            const columns = {};
-            headerItems.forEach(item => {
-                const txt = item.str.toUpperCase();
-                if (txt.includes('LINE')) columns.LINE = item.x;
-                else if (txt === 'OEM') columns.OEM = item.x;
-                else if (txt.includes('PRODUCT')) columns.PRODUCT = item.x;
-                else if (txt.includes('SERVICE LEVEL') || txt.includes('SLA')) columns.SLA = item.x;
-                else if (txt.includes('SERIAL')) columns.SERIAL = item.x;
-                else if (txt === 'QTY') columns.QTY = item.x;
-                else if (txt.includes('LOCATION')) columns.LOCATION = item.x;
-                else if (txt.includes('START')) columns.START = item.x;
-                else if (txt.includes('END DATE')) columns.END = item.x;
-                else if (txt === 'TOTAL') columns.TOTAL = item.x;
-            });
-
-            // Datenzeilen parsen (nach Header, bis "Grand Total" oder Ende)
+            // Datenzeilen parsen
             const dataRows = [];
-            for (let i = headerIndex + 1; i < allItems.length; i++) {
-                const line = allItems[i];
-                if (line.text.includes('Grand Total') || line.text.includes('Raw Grand Total')) break;
-                if (line.text.includes('Locations')) break;
-                if (line.text.includes('SERVICE DESCRIPTIONS')) break;
+            const datePattern = /(\d{2}-[A-Za-z]{3}-\d{4})/g;
+            const pricePattern = /€([\d.,]+)/;
+            const lineNumPattern = /^(\d+\.\d+\.?\d*\.?\d*)\s+/;
+            const slaPattern = /(\d+x\d+x\w+)/i;
+            const serialPattern = /([A-Z0-9]{8,})/i;
 
-                // Zeile muss mit LINE-Nummer beginnen (z.B. "1.1.1")
-                const lineMatch = line.text.match(/^(\d+\.\d+\.?\d*)/);
+            for (const line of allLines) {
+                // Zeile muss mit LINE-Nummer beginnen
+                const lineMatch = line.match(lineNumPattern);
                 if (!lineMatch) continue;
 
-                // Werte aus Zeile extrahieren basierend auf x-Position
-                const getValue = (targetX, items) => {
-                    // Finde Item, das am naechsten zur Ziel-x-Position ist
-                    let closest = null;
-                    let minDist = 100;
-                    items.forEach(item => {
-                        const dist = Math.abs(item.x - targetX);
-                        if (dist < minDist) {
-                            minDist = dist;
-                            closest = item.str;
-                        }
-                    });
-                    return closest || '';
-                };
+                // Stopp bei Grand Total
+                if (line.includes('Grand Total') || line.includes('Raw Grand Total')) break;
 
-                // Alternative: Items nach Position zusammenfassen
-                const sortedItems = line.items.sort((a, b) => a.x - b.x);
-                const parts = sortedItems.map(i => i.str);
-
-                // Versuche Struktur zu erkennen
                 const lineNum = lineMatch[1];
-                let oem = '', productName = '', sla = '', serial = '', qty = '1', location = '', startDate = '', endDate = '', total = '';
+                const restOfLine = line.substring(lineMatch[0].length);
 
-                // Finde OEM (normalerweise nach LINE)
-                const oemIdx = parts.findIndex(p => ['NetApp', 'Dell', 'HP', 'HPE', 'IBM', 'Cisco', 'EMC', 'Fujitsu', 'Lenovo'].some(m => p.includes(m)));
-                if (oemIdx >= 0) oem = parts[oemIdx];
-
-                // Finde Preis (€ oder "Included")
-                const priceIdx = parts.findIndex(p => p.includes('€') || p.toLowerCase() === 'included');
-                if (priceIdx >= 0) total = parts[priceIdx];
-
-                // Finde Datum (DD-MMM-YYYY Format)
-                const datePattern = /\d{2}-[A-Za-z]{3}-\d{4}/;
-                const dates = parts.filter(p => datePattern.test(p));
-                if (dates.length >= 2) {
-                    startDate = dates[0];
-                    endDate = dates[1];
-                } else if (dates.length === 1) {
-                    startDate = dates[0];
-                }
-
-                // Finde SLA (z.B. "5x9xNBD")
-                const slaMatch = parts.find(p => /\d+x\d+x/.test(p));
-                if (slaMatch) sla = slaMatch;
-
-                // Finde Seriennummer (lange Zahl oder alphanumerisch)
-                const serialMatch = parts.find(p => /^[A-Z0-9]{8,}$/i.test(p) && !datePattern.test(p));
-                if (serialMatch) serial = serialMatch;
-
-                // Finde Location (enthaelt Komma, z.B. "City, Country")
-                const locMatch = parts.find(p => p.includes(',') && !p.includes('€'));
-                if (locMatch) location = locMatch;
-
-                // Finde QTY (einzelne Zahl zwischen 1-99)
-                const qtyMatch = parts.find(p => /^[1-9]\d?$/.test(p));
-                if (qtyMatch) qty = qtyMatch;
-
-                // Produktname: zwischen OEM und SLA
-                if (oemIdx >= 0) {
-                    const afterOem = parts.slice(oemIdx + 1);
-                    const slaIdx = afterOem.findIndex(p => /\d+x\d+x/.test(p) || p.includes('Parts Tech'));
-                    if (slaIdx > 0) {
-                        productName = afterOem.slice(0, slaIdx).join(' ').replace(/Parts Tech.*$/, '').trim();
-                    } else {
-                        // Fallback: alles zwischen OEM und Datum/Preis
-                        const endIdx = afterOem.findIndex(p => datePattern.test(p) || p.includes('€') || /^[A-Z0-9]{8,}$/i.test(p));
-                        if (endIdx > 0) {
-                            productName = afterOem.slice(0, endIdx).filter(p => !['Parts', 'Tech', '&', 'Labor'].includes(p) && !/\d+x\d+/.test(p)).join(' ').trim();
-                        }
+                // OEM finden
+                let oem = 'N/A';
+                for (const m of knownOEMs) {
+                    if (restOfLine.includes(m)) {
+                        oem = m;
+                        break;
                     }
                 }
 
-                // Bereinige Produktname
-                productName = productName.replace(/ParkView.*$/i, '').replace(/Parts Tech.*$/i, '').trim();
-                if (!productName && oem) {
-                    // Versuche anders: nimm alles nach OEM bis zum naechsten bekannten Feld
-                    const fullText = line.text;
-                    const oemPos = fullText.indexOf(oem);
-                    if (oemPos >= 0) {
-                        let afterOemText = fullText.substring(oemPos + oem.length).trim();
-                        afterOemText = afterOemText.replace(/Parts Tech.*$/i, '').replace(/\d+x\d+x\S+.*$/i, '').trim();
-                        const firstDatePos = afterOemText.search(datePattern);
-                        if (firstDatePos > 0) {
-                            productName = afterOemText.substring(0, firstDatePos).trim();
-                        } else {
-                            productName = afterOemText.split(/\s{2,}/)[0] || afterOemText;
-                        }
+                // Preis finden
+                let total = '0';
+                const priceMatch = line.match(pricePattern);
+                if (priceMatch) {
+                    total = '€' + priceMatch[1];
+                } else if (line.toLowerCase().includes('included')) {
+                    total = 'Included';
+                }
+
+                // Datum finden
+                const dates = line.match(datePattern) || [];
+                const startDate = dates[0] || '';
+                const endDate = dates[1] || '';
+
+                // SLA finden
+                let sla = 'N/A';
+                const slaMatch = line.match(slaPattern);
+                if (slaMatch) sla = slaMatch[1];
+
+                // Seriennummer finden (nach OEM, vor Datum, 8+ Zeichen)
+                let serial = '';
+                const afterOemIdx = oem !== 'N/A' ? restOfLine.indexOf(oem) + oem.length : 0;
+                const searchArea = restOfLine.substring(afterOemIdx);
+                const serialCandidates = searchArea.match(/\b([A-Z0-9]{8,20})\b/gi) || [];
+                // Filtere Datumsformate und SLA raus
+                for (const c of serialCandidates) {
+                    if (!/\d{2}-[A-Za-z]{3}-\d{4}/.test(c) && !/\d+x\d+x/i.test(c)) {
+                        serial = c;
+                        break;
                     }
                 }
+
+                // Location finden (Stadt, Land)
+                let location = '';
+                const locMatch = line.match(/([A-Za-z\s]+,\s*[A-Za-z]+)\s+\d{2}-/);
+                if (locMatch) location = locMatch[1].trim();
+
+                // Produktname extrahieren
+                let productName = 'N/A';
+                if (oem !== 'N/A') {
+                    const oemIdx = restOfLine.indexOf(oem);
+                    let afterOem = restOfLine.substring(oemIdx + oem.length).trim();
+
+                    // Entferne bekannte Suffixe und finde Ende
+                    const stopPatterns = [
+                        /Parts Tech.*$/i,
+                        /ParkView.*$/i,
+                        /\d+x\d+x\w+/i,
+                        /\d{2}-[A-Za-z]{3}-\d{4}/,
+                        /[A-Z0-9]{10,}/,
+                        /\d+\s+(sepaf|[a-z]+-\d)/i
+                    ];
+
+                    for (const pattern of stopPatterns) {
+                        const match = afterOem.search(pattern);
+                        if (match > 0) {
+                            afterOem = afterOem.substring(0, match).trim();
+                            break;
+                        }
+                    }
+
+                    productName = afterOem.replace(/Parts Tech & Labor/gi, '').replace(/ParkView Supported/gi, '').trim() || 'N/A';
+                }
+
+                // QTY finden (einzelne Ziffer, oft nach Seriennummer)
+                let qty = 1;
+                const qtyMatch = line.match(/\s(\d)\s+[a-z]/i);
+                if (qtyMatch) qty = parseInt(qtyMatch[1]);
+
+                console.log('Parsed row:', { lineNum, oem, productName, sla, serial, startDate, endDate, total });
 
                 dataRows.push({
                     line: lineNum,
-                    oem: oem || 'N/A',
-                    productName: productName || 'N/A',
-                    sla: sla || 'N/A',
-                    serial: serial || '',
-                    qty: parseInt(qty) || 1,
-                    location: location || '',
+                    oem,
+                    productName,
+                    sla,
+                    serial,
+                    qty,
+                    location,
                     startDate,
                     endDate,
-                    total: total || '0'
+                    total
                 });
+            }
+
+            if (dataRows.length === 0) {
+                alert('Keine Datenzeilen gefunden. Bitte pruefen Sie das PDF-Format.');
+                return;
             }
 
             // Verarbeiten: Hauptzeilen und Included-Items
