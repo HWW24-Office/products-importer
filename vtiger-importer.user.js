@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.4.0
+// @version      1.5.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -207,6 +207,8 @@
                     <button class="importer-tab" data-panel="technogroup-pdf">Technogroup PDF</button>
                     <button class="importer-tab" data-panel="parkplace">Parkplace Excel</button>
                     <button class="importer-tab" data-panel="parkplace-pdf">Parkplace PDF</button>
+                    <button class="importer-tab" data-panel="dis-pdf">DIS PDF</button>
+                    <button class="importer-tab" data-panel="ids-pdf">IDS PDF</button>
                 </div>
                 <div id="importer-content">
                     <!-- Axians Panel -->
@@ -219,6 +221,10 @@
                     <div class="importer-panel" id="panel-parkplace"></div>
                     <!-- Parkplace PDF Panel -->
                     <div class="importer-panel" id="panel-parkplace-pdf"></div>
+                    <!-- DIS PDF Panel -->
+                    <div class="importer-panel" id="panel-dis-pdf"></div>
+                    <!-- IDS PDF Panel -->
+                    <div class="importer-panel" id="panel-ids-pdf"></div>
                 </div>
             </div>
         </div>
@@ -1252,7 +1258,8 @@
                 .replace(/(\d{2}\.\d{2}\.\d{4})\s*-\s*(\d{2}\.\d{2}\.\d{4})/g, '$1 - $2')
                 .replace(/\n+/g, '\n')
                 .replace(/(SN:)\s*\n/g, '$1 n.a.\n')
-                .replace(/(Serial Number:)\s*\n/gi, '$1 n.a.\n');
+                .replace(/(Serial Number:)\s*\n/gi, '$1 n.a.\n')
+                .replace(/(Seriennummer:)\s*\n/gi, '$1 n.a.\n');
 
             return cleanedData.replace(/(\d\.\s)(.*?)(?=\d\.\s|$)/gs, '$1$2\n\n').trim();
         }
@@ -1265,7 +1272,7 @@
                 let block = blockText.replace(/^\s*\d+\.\s*/, '').trim();
                 const text = block.split('\n').map(l => l.trim()).filter(l => l.length > 0).join(' ');
 
-                const snMatch = text.match(/(?:SN:|Serial Number:)\s*([^\s]+)/i);
+                const snMatch = text.match(/(?:SN:|Serial Number:|Seriennummer:)\s*([^\s]+)/i);
                 const serial = snMatch ? snMatch[1] : 'n.a.';
 
                 const dateMatches = [...text.matchAll(/\d{2}\.\d{2}\.\d{4}/g)].map(m => m[0]);
@@ -1276,10 +1283,16 @@
                 }
 
                 let sla = 'N/A';
-                if (/13x5\s*CTI\s*NBD/i.test(text)) sla = '5x9xNBD';
-                else if (/24x7\s*CTI\s*NBD/i.test(text)) sla = '7x24xNBD';
-                else if (/13x5\s*CTI\s*4h/i.test(text)) sla = '5x9x4';
-                else if (/24x7\s*CTI\s*4h/i.test(text)) sla = '7x24x4';
+                // SLA mapping - support both orders (CTI NBD and NBD CTI)
+                if (/13x5\s*(?:CTI\s*)?NBD(?:\s*CTI)?/i.test(text)) sla = '5x9xNBD';
+                else if (/24x7\s*(?:CTI\s*)?NBD(?:\s*CTI)?/i.test(text)) sla = '7x24xNBD';
+                else if (/13x5\s*(?:CTI\s*)?(?:4h?|04)(?:\s*CTI)?/i.test(text)) sla = '5x9x4';
+                else if (/24x7\s*(?:CTI\s*)?(?:4h?|04)(?:\s*CTI)?/i.test(text)) sla = '7x24x4';
+                // Additional patterns for Evernex format
+                else if (/5x9\s*NBD/i.test(text)) sla = '5x9xNBD';
+                else if (/7x24\s*NBD/i.test(text)) sla = '7x24xNBD';
+                else if (/5x9\s*4/i.test(text)) sla = '5x9x4';
+                else if (/7x24\s*4/i.test(text)) sla = '7x24x4';
 
                 const priceMatches = [...text.matchAll(/(\d+[.,]\d{2}\s?€)/g)].map(m => m[1]);
                 const einzelpreisMonat = priceMatches.length >= 1 ? priceMatches[0] : 'N/A';
@@ -2170,6 +2183,608 @@
     }
 
     // ============================================
+    // DIS PDF IMPORTER
+    // ============================================
+    function initDisPDF() {
+        const panel = document.getElementById('panel-dis-pdf');
+        panel.innerHTML = `
+            <h3>DIS PDF Importer</h3>
+            <div class="imp-form-group">
+                <input type="file" id="dispdf-file" accept="application/pdf" class="imp-hidden">
+                <div class="imp-drop-zone" id="dispdf-dropzone">DIS-PDF hierher ziehen oder klicken</div>
+            </div>
+            <div class="imp-row-grid">
+                <div class="imp-form-group">
+                    <label>Multiplikator:</label>
+                    <input type="number" id="dispdf-multiplier" value="1.84" step="0.01">
+                    <button id="dispdf-update-price">Unit Price aktualisieren</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>Manufacturer:</label>
+                    <input type="text" id="dispdf-manufacturer" placeholder="Hersteller">
+                    <button id="dispdf-apply-manufacturer">Anwenden</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>Land:</label>
+                    <input type="text" id="dispdf-country" value="Deutschland">
+                    <button id="dispdf-apply-country">Anwenden</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>SLA:</label>
+                    <input type="text" id="dispdf-sla" placeholder="Globales SLA">
+                    <button id="dispdf-apply-sla">Anwenden</button>
+                </div>
+            </div>
+            <h4>CSV Vorschau</h4>
+            <div style="overflow-x:auto;">
+                <table class="imp-table" id="dispdf-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Active</th>
+                            <th>Manufacturer</th>
+                            <th>Category</th>
+                            <th>Vendor</th>
+                            <th>Unit Price</th>
+                            <th>Stock</th>
+                            <th>Handler</th>
+                            <th>Description</th>
+                            <th>Purchase Cost</th>
+                            <th>SLA</th>
+                            <th>Country</th>
+                            <th>Duration</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="imp-form-group" style="margin-top:10px;">
+                <button id="dispdf-download">CSV speichern</button>
+                <button id="dispdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+            </div>
+        `;
+
+        let dispdfCurrentLang = 'de';
+        let dispdfParsedData = [];
+
+        const fileInput = document.getElementById('dispdf-file');
+        const dropZone = document.getElementById('dispdf-dropzone');
+        setupDropZone(dropZone, fileInput);
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                alert('Bitte eine PDF-Datei auswaehlen.');
+                return;
+            }
+            dropZone.textContent = file.name;
+            await processDisPdf(file);
+        });
+
+        async function processDisPdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+            let fullText = '';
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const content = await page.getTextContent();
+                const lines = {};
+                content.items.forEach(item => {
+                    const [,,,, x, y] = item.transform;
+                    const yKey = Math.round(y * 10);
+                    if (!lines[yKey]) lines[yKey] = [];
+                    lines[yKey].push({ x, str: item.str });
+                });
+                Object.keys(lines).map(k => parseInt(k)).sort((a, b) => b - a).forEach(yKey => {
+                    fullText += lines[yKey].sort((a, b) => a.x - b.x).map(i => i.str).join(' ') + '\n';
+                });
+                fullText += '\n';
+            }
+
+            dispdfParsedData = parseDisPdf(fullText.trim());
+            generateDisTable(dispdfParsedData);
+        }
+
+        function parseDisPdf(rawText) {
+            const items = [];
+
+            // Extract Laufzeit from *** Laufzeit: ... ***
+            let globalDuration = 12;
+            const durationMatch = rawText.match(/\*{3}\s*Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)\s*\*{3}/i);
+            if (durationMatch) {
+                globalDuration = parseInt(durationMatch[1], 10);
+            }
+
+            // Extract SLA from Servicezeiten and Reaktionszeit
+            let globalSla = 'N/A';
+            const serviceZeitenMatch = rawText.match(/Servicezeiten:\s*([^\n]+)/i);
+            const reaktionszeitMatch = rawText.match(/Reaktionszeit:\s*([^\n]+)/i);
+
+            if (serviceZeitenMatch && reaktionszeitMatch) {
+                const servicezeit = serviceZeitenMatch[1].trim().toLowerCase();
+                const reaktion = reaktionszeitMatch[1].trim().toLowerCase();
+
+                // Map to standard SLA format
+                if (servicezeit.includes('24x7') || servicezeit.includes('24/7')) {
+                    if (reaktion.includes('4') || reaktion.includes('vier')) {
+                        globalSla = '7x24x4';
+                    } else if (reaktion.includes('nbd') || reaktion.includes('next business')) {
+                        globalSla = '7x24xNBD';
+                    }
+                } else if (servicezeit.includes('5x9') || servicezeit.includes('10x5') || servicezeit.includes('mo-fr')) {
+                    if (reaktion.includes('4') || reaktion.includes('vier')) {
+                        globalSla = '5x9x4';
+                    } else if (reaktion.includes('nbd') || reaktion.includes('next business')) {
+                        globalSla = '5x9xNBD';
+                    }
+                }
+            }
+
+            // Extract country/location
+            let country = 'Deutschland';
+            const locationMatch = rawText.match(/(?:Standort|Location|Endkunde):\s*([^\n]+)/i);
+            if (locationMatch) {
+                country = locationMatch[1].trim();
+            }
+
+            // Find product blocks - typically structured with S/N: or Seriennummer:
+            const productBlocks = rawText.split(/(?=(?:S\/N:|SN:|Seriennummer:))/i);
+
+            productBlocks.forEach(block => {
+                if (!block.trim()) return;
+
+                // Extract serial number
+                const snMatch = block.match(/(?:S\/N:|SN:|Seriennummer:)\s*([A-Za-z0-9]+)/i);
+                if (!snMatch) return;
+
+                const serial = snMatch[1].trim();
+
+                // Extract product name - usually before the serial number or in nearby lines
+                let productName = 'N/A';
+                const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+
+                // Look for product identifiers
+                for (const line of lines) {
+                    // Skip lines that are just serial numbers or prices
+                    if (/^(?:S\/N:|SN:|Seriennummer:)/i.test(line)) continue;
+                    if (/^\d+[.,]\d{2}\s*€?$/.test(line)) continue;
+                    if (/^Pos\.?\s*\d+/i.test(line)) continue;
+
+                    // Look for product patterns like model numbers
+                    const modelMatch = line.match(/([A-Z]{2,}[\s-]?[A-Z0-9-]+)/);
+                    if (modelMatch && modelMatch[1].length > 3) {
+                        productName = modelMatch[1].trim();
+                        break;
+                    }
+                }
+
+                // Extract price
+                let price = 0;
+                const priceMatches = block.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€?/g);
+                if (priceMatches && priceMatches.length > 0) {
+                    const lastPrice = priceMatches[priceMatches.length - 1];
+                    let cleanPrice = lastPrice.replace(/[€\s]/g, '').trim();
+                    // Handle German number format
+                    if (cleanPrice.includes(',') && cleanPrice.indexOf(',') > cleanPrice.lastIndexOf('.')) {
+                        cleanPrice = cleanPrice.replace(/\./g, '').replace(',', '.');
+                    } else if (cleanPrice.includes('.') && cleanPrice.indexOf('.') > cleanPrice.lastIndexOf(',')) {
+                        cleanPrice = cleanPrice.replace(/,/g, '');
+                    }
+                    price = parseFloat(cleanPrice) || 0;
+                }
+
+                items.push({
+                    productName,
+                    serial,
+                    sla: globalSla,
+                    country,
+                    duration: globalDuration,
+                    purchaseCost: price
+                });
+            });
+
+            // Group by product name
+            const grouped = {};
+            items.forEach(item => {
+                const key = `${item.productName}|${item.sla}|${item.purchaseCost}`;
+                if (!grouped[key]) {
+                    grouped[key] = { ...item, serials: [], count: 0 };
+                }
+                grouped[key].serials.push(item.serial);
+                grouped[key].count++;
+            });
+
+            return Object.values(grouped);
+        }
+
+        function generateDisTable(data) {
+            const tbody = document.querySelector('#dispdf-table tbody');
+            const multiplier = parseFloat(document.getElementById('dispdf-multiplier').value) || 1.84;
+            const country = document.getElementById('dispdf-country').value || 'Deutschland';
+            const manufacturer = document.getElementById('dispdf-manufacturer').value || '';
+            tbody.innerHTML = '';
+
+            data.forEach((item, index) => {
+                const purchaseCost = (item.purchaseCost * item.duration).toFixed(2);
+                const unitPrice = (purchaseCost * multiplier).toFixed(2);
+                const description = `S/N: ${item.serials.join(', ') || 'n.a.'}`;
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td contenteditable="true">${item.productName}</td>
+                    <td>1</td>
+                    <td><input type="text" value="${manufacturer}" class="dispdf-manufacturer-input" style="width:100%;"></td>
+                    <td>Wartung</td>
+                    <td>DIS AG</td>
+                    <td contenteditable="true">${unitPrice}</td>
+                    <td>999</td>
+                    <td>Team Wartung</td>
+                    <td contenteditable="true" style="white-space:pre-wrap;">${description}</td>
+                    <td contenteditable="true">${purchaseCost}</td>
+                    <td><input type="text" value="${item.sla}" class="dispdf-sla-input" style="width:100%;"></td>
+                    <td><input type="text" value="${item.country || country}" class="dispdf-country-input" style="width:100%;"></td>
+                    <td contenteditable="true">${item.duration}</td>
+                    <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        document.getElementById('dispdf-apply-manufacturer').addEventListener('click', () => {
+            const val = document.getElementById('dispdf-manufacturer').value;
+            document.querySelectorAll('.dispdf-manufacturer-input').forEach(i => i.value = val);
+        });
+        document.getElementById('dispdf-apply-country').addEventListener('click', () => {
+            const val = document.getElementById('dispdf-country').value;
+            document.querySelectorAll('.dispdf-country-input').forEach(i => i.value = val);
+        });
+        document.getElementById('dispdf-apply-sla').addEventListener('click', () => {
+            const val = document.getElementById('dispdf-sla').value;
+            document.querySelectorAll('.dispdf-sla-input').forEach(i => i.value = val);
+        });
+        document.getElementById('dispdf-update-price').addEventListener('click', () => {
+            const multiplier = parseFloat(document.getElementById('dispdf-multiplier').value) || 1.84;
+            document.querySelectorAll('#dispdf-table tbody tr').forEach(row => {
+                const purchaseCost = parseFloat(row.cells[9].textContent.replace(',', '.')) || 0;
+                row.cells[5].textContent = (purchaseCost * multiplier).toFixed(2);
+            });
+        });
+
+        document.getElementById('dispdf-download').addEventListener('click', () => {
+            const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months"];
+            const csvRows = [headers.join(';')];
+
+            document.querySelectorAll('#dispdf-table tbody tr').forEach(row => {
+                const cells = row.cells;
+                csvRows.push([
+                    cells[0].textContent, cells[1].textContent,
+                    cells[2].querySelector('input').value,
+                    cells[3].textContent, cells[4].textContent,
+                    cells[5].textContent, cells[6].textContent, cells[7].textContent,
+                    `"${cells[8].textContent}"`,
+                    cells[9].textContent,
+                    cells[10].querySelector('input').value,
+                    cells[11].querySelector('input').value,
+                    cells[12].textContent
+                ].join(';'));
+            });
+            downloadCSV(csvRows, 'vtiger_import_dis_pdf.csv');
+        });
+
+        document.getElementById('dispdf-lang-toggle').addEventListener('click', () => {
+            dispdfCurrentLang = toggleLanguage('dispdf-table', 'dispdf-country-input', dispdfCurrentLang);
+            document.getElementById('dispdf-lang-toggle').textContent =
+                dispdfCurrentLang === 'de' ? 'Sprache: DE → EN' : 'Sprache: EN → DE';
+        });
+    }
+
+    // ============================================
+    // IDS PDF IMPORTER
+    // ============================================
+    function initIdsPDF() {
+        const panel = document.getElementById('panel-ids-pdf');
+        panel.innerHTML = `
+            <h3>IDS PDF Importer</h3>
+            <div class="imp-form-group">
+                <input type="file" id="idspdf-file" accept="application/pdf" class="imp-hidden">
+                <div class="imp-drop-zone" id="idspdf-dropzone">IDS-PDF hierher ziehen oder klicken</div>
+            </div>
+            <div class="imp-row-grid">
+                <div class="imp-form-group">
+                    <label>Multiplikator:</label>
+                    <input type="number" id="idspdf-multiplier" value="1.84" step="0.01">
+                    <button id="idspdf-update-price">Unit Price aktualisieren</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>Manufacturer:</label>
+                    <input type="text" id="idspdf-manufacturer" value="Cisco" placeholder="Hersteller">
+                    <button id="idspdf-apply-manufacturer">Anwenden</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>Land:</label>
+                    <input type="text" id="idspdf-country" value="">
+                    <button id="idspdf-apply-country">Anwenden</button>
+                </div>
+            </div>
+            <h4>CSV Vorschau</h4>
+            <div style="overflow-x:auto;">
+                <table class="imp-table" id="idspdf-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Active</th>
+                            <th>Manufacturer</th>
+                            <th>Category</th>
+                            <th>Vendor</th>
+                            <th>Unit Price</th>
+                            <th>Stock</th>
+                            <th>Handler</th>
+                            <th>Description</th>
+                            <th>Purchase Cost</th>
+                            <th>SLA</th>
+                            <th>Country</th>
+                            <th>Duration</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <div class="imp-form-group" style="margin-top:10px;">
+                <button id="idspdf-download">CSV speichern</button>
+                <button id="idspdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+            </div>
+        `;
+
+        let idspdfCurrentLang = 'de';
+        let idspdfParsedData = [];
+
+        const fileInput = document.getElementById('idspdf-file');
+        const dropZone = document.getElementById('idspdf-dropzone');
+        setupDropZone(dropZone, fileInput);
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                alert('Bitte eine PDF-Datei auswaehlen.');
+                return;
+            }
+            dropZone.textContent = file.name;
+            await processIdsPdf(file);
+        });
+
+        async function processIdsPdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+            let fullText = '';
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const content = await page.getTextContent();
+                const lines = {};
+                content.items.forEach(item => {
+                    const [,,,, x, y] = item.transform;
+                    const yKey = Math.round(y * 10);
+                    if (!lines[yKey]) lines[yKey] = [];
+                    lines[yKey].push({ x, str: item.str });
+                });
+                Object.keys(lines).map(k => parseInt(k)).sort((a, b) => b - a).forEach(yKey => {
+                    fullText += lines[yKey].sort((a, b) => a.x - b.x).map(i => i.str).join(' ') + '\n';
+                });
+                fullText += '\n';
+            }
+
+            idspdfParsedData = parseIdsPdf(fullText.trim());
+            generateIdsTable(idspdfParsedData);
+        }
+
+        function parseIdsPdf(rawText) {
+            // Extract country from Standort/Endkundenstandort
+            let country = '';
+            const countryMatch = rawText.match(/(?:Endkundenstandort|Standort):\s*([A-Za-zÄÖÜäöüß ]+)/i);
+            if (countryMatch) country = countryMatch[1].trim();
+
+            // Format raw data - remove headers and footers
+            let formatted = rawText
+                .replace(/\r\n/g, '\n')
+                .replace(/^Pos\s+Menge\s+Art[\.-]Nr\s+Text\s+Einzelpreis\s*$/gm, '')
+                .replace(/^€\s*$/gm, '')
+                .replace(/^Gesamtpreis\s*$/gm, '')
+                .replace(/\n{2,}/g, '\n')
+                .replace(/-\n/g, '');
+
+            // Remove common footer lines
+            const filterPatterns = [
+                /^\s*Übertrag/i, /^(Wilhelm-Röntgen|Kunden Nr\.|Debitoren Nr\.|Bearbeiter:)/i,
+                /^Bestellnr\./i, /^Lieferdatum:/i, /^Datum:/i, /^Angebot Nr\./i,
+                /^Zwischensumme/i, /^Gesamt Netto/i, /^steuerfrei/i, /^Gesamtbetrag/i
+            ];
+
+            let lines = formatted.split('\n').map(l => l.trim()).filter(l => l);
+            filterPatterns.forEach(pattern => {
+                lines = lines.filter(line => !pattern.test(line));
+            });
+
+            const items = [];
+            let lastIdxProduct = -1;
+
+            for (let idx = 0; idx < lines.length; idx++) {
+                const line = lines[idx];
+
+                // Product line: "Pos Menge ... Stck." or "Monat"
+                const prodMatch = line.match(/^(?<pos>\d+|A)\s+(?<qty>[\d,]+)\s+(?:Stck\.|Monat)\s+(?<rest>.*)/i);
+                if (prodMatch) {
+                    const pos = prodMatch.groups.pos;
+                    const qty = parseInt(prodMatch.groups.qty.replace(',', '.'), 10);
+
+                    items.push({
+                        pos,
+                        rawLines: [line],
+                        seriennummern: '',
+                        seriennummerCount: 0,
+                        sla: 'tba.',
+                        serviceStart: 'tba.',
+                        serviceEnde: 'tba.',
+                        stueck: qty,
+                        einzelpreis: 0,
+                        gesamtpreis: 0,
+                        durationInMonths: 12,
+                        artikelnummer: 'tba.',
+                        country
+                    });
+                    lastIdxProduct = items.length - 1;
+                    continue;
+                }
+
+                // SN block
+                if (/^(?:SN:|S\/N:|Serial:|Seriennummer:)/i.test(line)) {
+                    if (lastIdxProduct >= 0) {
+                        const serials = [];
+                        let first = line.replace(/^(?:SN:|S\/N:|Serial:|Seriennummer:)\s*/i, '').trim();
+                        if (first) serials.push(first);
+
+                        let k = idx + 1;
+                        while (k < lines.length && /^[A-Za-z0-9]+$/.test(lines[k])) {
+                            serials.push(lines[k].trim());
+                            k++;
+                        }
+
+                        const item = items[lastIdxProduct];
+                        item.seriennummerCount = serials.length;
+                        item.seriennummern = serials.join(', ');
+                    }
+                    continue;
+                }
+
+                // Continuation of product description
+                if (lastIdxProduct >= 0) {
+                    items[lastIdxProduct].rawLines.push(line);
+                }
+            }
+
+            // Finalize each item
+            items.forEach(item => {
+                const blockText = item.rawLines.join(' ');
+
+                // Article number after "für"
+                const artnrMatch = blockText.match(/für\s+([A-Z0-9-]+)/i);
+                if (artnrMatch) item.artikelnummer = artnrMatch[1].trim();
+
+                // SLA from "Reaktionszeit:"
+                const slaMatch = blockText.match(/Reaktionszeit:\s*([\d+xhNBD]+)/i);
+                if (slaMatch) {
+                    const rawSla = slaMatch[1].trim().toLowerCase();
+                    if (rawSla.includes('10x5xnbd') || rawSla.includes('5x9xnbd')) item.sla = '5x9xNBD';
+                    else if (rawSla.includes('24x7x4h') || rawSla.includes('7x24x4')) item.sla = '7x24x4';
+                    else if (rawSla.includes('24x7xnbd') || rawSla.includes('7x24xnbd')) item.sla = '7x24xNBD';
+                    else if (rawSla.includes('5x9x4') || rawSla.includes('10x5x4')) item.sla = '5x9x4';
+                }
+
+                // Duration in months
+                const durationMatch = blockText.match(/Laufzeit:\s*(\d+)\s*Monate/i);
+                if (durationMatch) item.durationInMonths = parseInt(durationMatch[1], 10);
+
+                // Prices
+                const normalize = str => str.replace(/,/g, '');
+                let priceMatch = blockText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                if (!priceMatch) {
+                    const altMatch = blockText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})\s*\(\s*(\d{1,3}(?:,\d{3})*\.\d{2})\s*\)/);
+                    if (altMatch) priceMatch = altMatch;
+                }
+                if (priceMatch) {
+                    item.einzelpreis = parseFloat(normalize(priceMatch[1]));
+                    item.gesamtpreis = parseFloat(normalize(priceMatch[2]));
+                }
+
+                if (!item.seriennummerCount) {
+                    item.seriennummerCount = item.stueck;
+                    item.seriennummern = Array(item.stueck).fill('tba.').join(', ');
+                }
+            });
+
+            return items;
+        }
+
+        function generateIdsTable(data) {
+            const tbody = document.querySelector('#idspdf-table tbody');
+            const multiplier = parseFloat(document.getElementById('idspdf-multiplier').value) || 1.84;
+            const countryInput = document.getElementById('idspdf-country').value || '';
+            const manufacturer = document.getElementById('idspdf-manufacturer').value || 'Cisco';
+            tbody.innerHTML = '';
+
+            data.forEach((item, index) => {
+                const purchaseCost = item.einzelpreis.toFixed(2);
+                const unitPrice = (item.einzelpreis * multiplier).toFixed(2);
+                const description = `S/N: ${item.seriennummern}\nService Start: ${item.serviceStart}\nService Ende: ${item.serviceEnde}`;
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td contenteditable="true">${item.artikelnummer}</td>
+                    <td>1</td>
+                    <td><input type="text" value="${manufacturer}" class="idspdf-manufacturer-input" style="width:100%;"></td>
+                    <td>Wartung</td>
+                    <td>Inter Data Systems GmbH</td>
+                    <td contenteditable="true">${unitPrice}</td>
+                    <td>999</td>
+                    <td>Team Wartung</td>
+                    <td contenteditable="true" style="white-space:pre-wrap;">${description}</td>
+                    <td contenteditable="true">${purchaseCost}</td>
+                    <td><input type="text" value="${item.sla}" class="idspdf-sla-input" style="width:100%;"></td>
+                    <td><input type="text" value="${item.country || countryInput}" class="idspdf-country-input" style="width:100%;"></td>
+                    <td contenteditable="true">${item.durationInMonths}</td>
+                    <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        document.getElementById('idspdf-apply-manufacturer').addEventListener('click', () => {
+            const val = document.getElementById('idspdf-manufacturer').value;
+            document.querySelectorAll('.idspdf-manufacturer-input').forEach(i => i.value = val);
+        });
+        document.getElementById('idspdf-apply-country').addEventListener('click', () => {
+            const val = document.getElementById('idspdf-country').value;
+            document.querySelectorAll('.idspdf-country-input').forEach(i => i.value = val);
+        });
+        document.getElementById('idspdf-update-price').addEventListener('click', () => {
+            const multiplier = parseFloat(document.getElementById('idspdf-multiplier').value) || 1.84;
+            document.querySelectorAll('#idspdf-table tbody tr').forEach(row => {
+                const purchaseCost = parseFloat(row.cells[9].textContent.replace(',', '.')) || 0;
+                row.cells[5].textContent = (purchaseCost * multiplier).toFixed(2);
+            });
+        });
+
+        document.getElementById('idspdf-download').addEventListener('click', () => {
+            const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months"];
+            const csvRows = [headers.join(';')];
+
+            document.querySelectorAll('#idspdf-table tbody tr').forEach(row => {
+                const cells = row.cells;
+                csvRows.push([
+                    cells[0].textContent, cells[1].textContent,
+                    cells[2].querySelector('input').value,
+                    cells[3].textContent, cells[4].textContent,
+                    cells[5].textContent, cells[6].textContent, cells[7].textContent,
+                    `"${cells[8].textContent}"`,
+                    cells[9].textContent,
+                    cells[10].querySelector('input').value,
+                    cells[11].querySelector('input').value,
+                    cells[12].textContent
+                ].join(';'));
+            });
+            downloadCSV(csvRows, 'vtiger_import_ids_pdf.csv');
+        });
+
+        document.getElementById('idspdf-lang-toggle').addEventListener('click', () => {
+            idspdfCurrentLang = toggleLanguage('idspdf-table', 'idspdf-country-input', idspdfCurrentLang);
+            document.getElementById('idspdf-lang-toggle').textContent =
+                idspdfCurrentLang === 'de' ? 'Sprache: DE → EN' : 'Sprache: EN → DE';
+        });
+    }
+
+    // ============================================
     // INITIALISIERUNG
     // ============================================
     function init() {
@@ -2179,6 +2794,8 @@
         initTechnogroupPDF();
         initParkplace();
         initParkplacePDF();
+        initDisPDF();
+        initIdsPDF();
     }
 
     // Warten bis DOM vollstaendig geladen
