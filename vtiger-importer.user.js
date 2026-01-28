@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.2.1
+// @version      1.3.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -371,6 +371,77 @@
         link.download = filename;
         link.click();
         URL.revokeObjectURL(csvUrl);
+    }
+
+    // ============================================
+    // SPRACH-UMSCHALTUNG (DE <-> EN)
+    // ============================================
+    const translationMap = {
+        // Laender
+        'Deutschland': 'Germany',
+        'Germany': 'Deutschland',
+        'Oesterreich': 'Austria',
+        'Österreich': 'Austria',
+        'Austria': 'Oesterreich',
+        'Schweiz': 'Switzerland',
+        'Switzerland': 'Schweiz',
+        // Description-Texte
+        'inkl.:': 'incl.:',
+        'incl.:': 'inkl.:',
+        'Service Ende:': 'Service End:',
+        'Service End:': 'Service Ende:',
+        'Service Start:': 'Service Start:', // bleibt gleich
+    };
+
+    function toggleLanguage(tableId, countryInputClass, currentLang) {
+        const newLang = currentLang === 'de' ? 'en' : 'de';
+        const tbody = document.querySelector(`#${tableId} tbody`);
+        if (!tbody) return newLang;
+
+        // Country-Inputs uebersetzen
+        if (countryInputClass) {
+            document.querySelectorAll(`.${countryInputClass}`).forEach(input => {
+                const val = input.value.trim();
+                if (translationMap[val]) {
+                    input.value = translationMap[val];
+                }
+            });
+        }
+
+        // Description-Spalte uebersetzen (normalerweise Spalte 8)
+        tbody.querySelectorAll('tr').forEach(row => {
+            const descCell = row.cells[8];
+            if (descCell) {
+                let text = descCell.innerHTML;
+                // Ersetze alle bekannten Begriffe
+                Object.entries(translationMap).forEach(([from, to]) => {
+                    // Nur in eine Richtung je nach aktueller Sprache
+                    if (currentLang === 'de') {
+                        // DE -> EN
+                        if (from === 'inkl.:' || from === 'Service Ende:') {
+                            text = text.split(from).join(to);
+                        }
+                    } else {
+                        // EN -> DE
+                        if (from === 'incl.:' || from === 'Service End:') {
+                            text = text.split(from).join(to);
+                        }
+                    }
+                });
+                descCell.innerHTML = text;
+            }
+
+            // Country-Spalte (contenteditable) uebersetzen - falls keine Input-Felder
+            const countryCell = row.cells[11];
+            if (countryCell && !countryCell.querySelector('input')) {
+                const val = countryCell.textContent.trim();
+                if (translationMap[val]) {
+                    countryCell.textContent = translationMap[val];
+                }
+            }
+        });
+
+        return newLang;
     }
 
     // ============================================
@@ -1001,10 +1072,14 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <button id="tgpdf-download">CSV speichern</button>
+            <div class="imp-form-group" style="margin-top:10px;">
+                <button id="tgpdf-download">CSV speichern</button>
+                <button id="tgpdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+            </div>
         `;
 
         let globalParsedData = [];
+        let tgpdfCurrentLang = 'de';
 
         const fileInput = document.getElementById('tgpdf-file');
         const dropZone = document.getElementById('tgpdf-dropzone');
@@ -1213,6 +1288,12 @@
             });
             downloadCSV(csvRows, 'vtiger_import_tg_pdf.csv');
         });
+
+        document.getElementById('tgpdf-lang-toggle').addEventListener('click', () => {
+            tgpdfCurrentLang = toggleLanguage('tgpdf-table', 'tgpdf-country-input', tgpdfCurrentLang);
+            document.getElementById('tgpdf-lang-toggle').textContent =
+                tgpdfCurrentLang === 'de' ? 'Sprache: DE → EN' : 'Sprache: EN → DE';
+        });
     }
 
     // ============================================
@@ -1259,9 +1340,13 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <button id="pp-download">CSV herunterladen</button>
+            <div class="imp-form-group" style="margin-top:10px;">
+                <button id="pp-download">CSV herunterladen</button>
+                <button id="pp-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+            </div>
         `;
 
+        let ppCurrentLang = 'de';
         const fileInput = document.getElementById('pp-file');
         const dropZone = document.getElementById('pp-dropzone');
         setupDropZone(dropZone, fileInput);
@@ -1465,6 +1550,12 @@
             });
             downloadCSV(csvRows, 'bereinigte_daten_parkplace.csv');
         });
+
+        document.getElementById('pp-lang-toggle').addEventListener('click', () => {
+            ppCurrentLang = toggleLanguage('pp-table', null, ppCurrentLang);
+            document.getElementById('pp-lang-toggle').textContent =
+                ppCurrentLang === 'de' ? 'Sprache: DE → EN' : 'Sprache: EN → DE';
+        });
     }
 
     // ============================================
@@ -1520,9 +1611,13 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <button id="pppdf-download">CSV herunterladen</button>
+            <div class="imp-form-group" style="margin-top:10px;">
+                <button id="pppdf-download">CSV herunterladen</button>
+                <button id="pppdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+            </div>
         `;
 
+        let pppdfCurrentLang = 'de';
         const fileInput = document.getElementById('pppdf-file');
         const dropZone = document.getElementById('pppdf-dropzone');
         setupDropZone(dropZone, fileInput);
@@ -1864,6 +1959,12 @@
                 ].join(';'));
             });
             downloadCSV(csvRows, 'parkplace_pdf_import.csv');
+        });
+
+        document.getElementById('pppdf-lang-toggle').addEventListener('click', () => {
+            pppdfCurrentLang = toggleLanguage('pppdf-table', 'pppdf-country-input', pppdfCurrentLang);
+            document.getElementById('pppdf-lang-toggle').textContent =
+                pppdfCurrentLang === 'de' ? 'Sprache: DE → EN' : 'Sprache: EN → DE';
         });
     }
 
