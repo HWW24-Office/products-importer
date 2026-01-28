@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.1.0
+// @version      1.2.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -205,6 +205,7 @@
                     <button class="importer-tab" data-panel="technogroup">Technogroup List</button>
                     <button class="importer-tab" data-panel="technogroup-pdf">Technogroup PDF</button>
                     <button class="importer-tab" data-panel="parkplace">Parkplace Excel</button>
+                    <button class="importer-tab" data-panel="parkplace-pdf">Parkplace PDF</button>
                 </div>
                 <div id="importer-content">
                     <!-- Axians Panel -->
@@ -215,6 +216,8 @@
                     <div class="importer-panel" id="panel-technogroup-pdf"></div>
                     <!-- Parkplace Panel -->
                     <div class="importer-panel" id="panel-parkplace"></div>
+                    <!-- Parkplace PDF Panel -->
+                    <div class="importer-panel" id="panel-parkplace-pdf"></div>
                 </div>
             </div>
         </div>
@@ -1465,6 +1468,429 @@
     }
 
     // ============================================
+    // PARKPLACE PDF IMPORTER
+    // ============================================
+    function initParkplacePDF() {
+        const panel = document.getElementById('panel-parkplace-pdf');
+        panel.innerHTML = `
+            <h3>Parkplace PDF Importer</h3>
+            <div class="imp-form-group">
+                <input type="file" id="pppdf-file" accept="application/pdf" class="imp-hidden">
+                <div class="imp-drop-zone" id="pppdf-dropzone">PDF hierher ziehen oder klicken</div>
+            </div>
+            <div class="imp-row-grid">
+                <div class="imp-form-group">
+                    <label>Multiplikator:</label>
+                    <input type="number" id="pppdf-multiplier" value="1.84" step="0.01">
+                    <button id="pppdf-update-price">Unit Price aktualisieren</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>Land ueberschreiben:</label>
+                    <input type="text" id="pppdf-country" placeholder="Leer = aus PDF">
+                    <button id="pppdf-apply-country">Anwenden</button>
+                </div>
+                <div class="imp-form-group">
+                    <label>SLA ueberschreiben:</label>
+                    <input type="text" id="pppdf-sla" placeholder="Leer = aus PDF">
+                    <button id="pppdf-apply-sla">Anwenden</button>
+                </div>
+            </div>
+            <h4>CSV Vorschau</h4>
+            <div style="overflow-x:auto;">
+                <table class="imp-table" id="pppdf-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Active</th>
+                            <th>Manufacturer</th>
+                            <th>Category</th>
+                            <th>Vendor</th>
+                            <th>Unit Price</th>
+                            <th>Stock</th>
+                            <th>Handler</th>
+                            <th>Description</th>
+                            <th>Purchase Cost</th>
+                            <th>SLA</th>
+                            <th>Country</th>
+                            <th>Duration</th>
+                            <th>Merged</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <button id="pppdf-download">CSV herunterladen</button>
+        `;
+
+        const fileInput = document.getElementById('pppdf-file');
+        const dropZone = document.getElementById('pppdf-dropzone');
+        setupDropZone(dropZone, fileInput);
+
+        fileInput.addEventListener('change', async () => {
+            const file = fileInput.files[0];
+            if (!file || file.type !== 'application/pdf') {
+                alert('Bitte eine PDF-Datei auswaehlen.');
+                return;
+            }
+            dropZone.textContent = file.name;
+            await processParkplacePdf(file);
+        });
+
+        async function processParkplacePdf(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+            let allItems = [];
+
+            for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+                const page = await pdf.getPage(pageNum);
+                const content = await page.getTextContent();
+                const items = content.items;
+
+                // Gruppieren nach y-Koordinate fuer Zeilenerkennung
+                const lines = {};
+                items.forEach(item => {
+                    const [,,,, x, y] = item.transform;
+                    const yKey = Math.round(y);
+                    if (!lines[yKey]) lines[yKey] = [];
+                    lines[yKey].push({ x: Math.round(x), str: item.str.trim() });
+                });
+
+                // Zeilen sortieren (von oben nach unten)
+                const sortedYKeys = Object.keys(lines).map(k => parseInt(k)).sort((a, b) => b - a);
+
+                sortedYKeys.forEach(yKey => {
+                    const lineItems = lines[yKey].sort((a, b) => a.x - b.x);
+                    const lineText = lineItems.map(i => i.str).join(' ');
+                    allItems.push({ y: yKey, items: lineItems, text: lineText });
+                });
+            }
+
+            // Header-Zeile finden
+            let headerIndex = -1;
+            for (let i = 0; i < allItems.length; i++) {
+                const text = allItems[i].text.toUpperCase();
+                if (text.includes('LINE') && text.includes('OEM') && text.includes('PRODUCT')) {
+                    headerIndex = i;
+                    break;
+                }
+            }
+
+            if (headerIndex === -1) {
+                alert('Konnte Tabellen-Header nicht finden.');
+                return;
+            }
+
+            // Spalten-Positionen aus Header ermitteln
+            const headerItems = allItems[headerIndex].items;
+            const columns = {};
+            headerItems.forEach(item => {
+                const txt = item.str.toUpperCase();
+                if (txt.includes('LINE')) columns.LINE = item.x;
+                else if (txt === 'OEM') columns.OEM = item.x;
+                else if (txt.includes('PRODUCT')) columns.PRODUCT = item.x;
+                else if (txt.includes('SERVICE LEVEL') || txt.includes('SLA')) columns.SLA = item.x;
+                else if (txt.includes('SERIAL')) columns.SERIAL = item.x;
+                else if (txt === 'QTY') columns.QTY = item.x;
+                else if (txt.includes('LOCATION')) columns.LOCATION = item.x;
+                else if (txt.includes('START')) columns.START = item.x;
+                else if (txt.includes('END DATE')) columns.END = item.x;
+                else if (txt === 'TOTAL') columns.TOTAL = item.x;
+            });
+
+            // Datenzeilen parsen (nach Header, bis "Grand Total" oder Ende)
+            const dataRows = [];
+            for (let i = headerIndex + 1; i < allItems.length; i++) {
+                const line = allItems[i];
+                if (line.text.includes('Grand Total') || line.text.includes('Raw Grand Total')) break;
+                if (line.text.includes('Locations')) break;
+                if (line.text.includes('SERVICE DESCRIPTIONS')) break;
+
+                // Zeile muss mit LINE-Nummer beginnen (z.B. "1.1.1")
+                const lineMatch = line.text.match(/^(\d+\.\d+\.?\d*)/);
+                if (!lineMatch) continue;
+
+                // Werte aus Zeile extrahieren basierend auf x-Position
+                const getValue = (targetX, items) => {
+                    // Finde Item, das am naechsten zur Ziel-x-Position ist
+                    let closest = null;
+                    let minDist = 100;
+                    items.forEach(item => {
+                        const dist = Math.abs(item.x - targetX);
+                        if (dist < minDist) {
+                            minDist = dist;
+                            closest = item.str;
+                        }
+                    });
+                    return closest || '';
+                };
+
+                // Alternative: Items nach Position zusammenfassen
+                const sortedItems = line.items.sort((a, b) => a.x - b.x);
+                const parts = sortedItems.map(i => i.str);
+
+                // Versuche Struktur zu erkennen
+                const lineNum = lineMatch[1];
+                let oem = '', productName = '', sla = '', serial = '', qty = '1', location = '', startDate = '', endDate = '', total = '';
+
+                // Finde OEM (normalerweise nach LINE)
+                const oemIdx = parts.findIndex(p => ['NetApp', 'Dell', 'HP', 'HPE', 'IBM', 'Cisco', 'EMC', 'Fujitsu', 'Lenovo'].some(m => p.includes(m)));
+                if (oemIdx >= 0) oem = parts[oemIdx];
+
+                // Finde Preis (€ oder "Included")
+                const priceIdx = parts.findIndex(p => p.includes('€') || p.toLowerCase() === 'included');
+                if (priceIdx >= 0) total = parts[priceIdx];
+
+                // Finde Datum (DD-MMM-YYYY Format)
+                const datePattern = /\d{2}-[A-Za-z]{3}-\d{4}/;
+                const dates = parts.filter(p => datePattern.test(p));
+                if (dates.length >= 2) {
+                    startDate = dates[0];
+                    endDate = dates[1];
+                } else if (dates.length === 1) {
+                    startDate = dates[0];
+                }
+
+                // Finde SLA (z.B. "5x9xNBD")
+                const slaMatch = parts.find(p => /\d+x\d+x/.test(p));
+                if (slaMatch) sla = slaMatch;
+
+                // Finde Seriennummer (lange Zahl oder alphanumerisch)
+                const serialMatch = parts.find(p => /^[A-Z0-9]{8,}$/i.test(p) && !datePattern.test(p));
+                if (serialMatch) serial = serialMatch;
+
+                // Finde Location (enthaelt Komma, z.B. "City, Country")
+                const locMatch = parts.find(p => p.includes(',') && !p.includes('€'));
+                if (locMatch) location = locMatch;
+
+                // Finde QTY (einzelne Zahl zwischen 1-99)
+                const qtyMatch = parts.find(p => /^[1-9]\d?$/.test(p));
+                if (qtyMatch) qty = qtyMatch;
+
+                // Produktname: zwischen OEM und SLA
+                if (oemIdx >= 0) {
+                    const afterOem = parts.slice(oemIdx + 1);
+                    const slaIdx = afterOem.findIndex(p => /\d+x\d+x/.test(p) || p.includes('Parts Tech'));
+                    if (slaIdx > 0) {
+                        productName = afterOem.slice(0, slaIdx).join(' ').replace(/Parts Tech.*$/, '').trim();
+                    } else {
+                        // Fallback: alles zwischen OEM und Datum/Preis
+                        const endIdx = afterOem.findIndex(p => datePattern.test(p) || p.includes('€') || /^[A-Z0-9]{8,}$/i.test(p));
+                        if (endIdx > 0) {
+                            productName = afterOem.slice(0, endIdx).filter(p => !['Parts', 'Tech', '&', 'Labor'].includes(p) && !/\d+x\d+/.test(p)).join(' ').trim();
+                        }
+                    }
+                }
+
+                // Bereinige Produktname
+                productName = productName.replace(/ParkView.*$/i, '').replace(/Parts Tech.*$/i, '').trim();
+                if (!productName && oem) {
+                    // Versuche anders: nimm alles nach OEM bis zum naechsten bekannten Feld
+                    const fullText = line.text;
+                    const oemPos = fullText.indexOf(oem);
+                    if (oemPos >= 0) {
+                        let afterOemText = fullText.substring(oemPos + oem.length).trim();
+                        afterOemText = afterOemText.replace(/Parts Tech.*$/i, '').replace(/\d+x\d+x\S+.*$/i, '').trim();
+                        const firstDatePos = afterOemText.search(datePattern);
+                        if (firstDatePos > 0) {
+                            productName = afterOemText.substring(0, firstDatePos).trim();
+                        } else {
+                            productName = afterOemText.split(/\s{2,}/)[0] || afterOemText;
+                        }
+                    }
+                }
+
+                dataRows.push({
+                    line: lineNum,
+                    oem: oem || 'N/A',
+                    productName: productName || 'N/A',
+                    sla: sla || 'N/A',
+                    serial: serial || '',
+                    qty: parseInt(qty) || 1,
+                    location: location || '',
+                    startDate,
+                    endDate,
+                    total: total || '0'
+                });
+            }
+
+            // Verarbeiten: Hauptzeilen und Included-Items
+            const multiplier = parseFloat(document.getElementById('pppdf-multiplier').value) || 1.84;
+            const mergedRows = [];
+
+            for (let i = 0; i < dataRows.length; i++) {
+                const row = dataRows[i];
+                const isIncluded = row.total.toLowerCase() === 'included';
+
+                if (isIncluded) {
+                    // Zu letzter Hauptzeile hinzufuegen
+                    if (mergedRows.length > 0) {
+                        const lastRow = mergedRows[mergedRows.length - 1];
+                        const itemName = row.productName;
+                        lastRow.includedItems[itemName] = (lastRow.includedItems[itemName] || 0) + row.qty;
+                        if (row.serial) lastRow.serialNumbers.push(row.serial);
+                    }
+                } else {
+                    // Preis parsen
+                    let numericValue = 0;
+                    const priceStr = row.total.replace(/[^0-9,.\-]/g, '').trim();
+                    if (priceStr.match(/^\d{1,3}(\.\d{3})*,\d{2}$/)) {
+                        numericValue = parseFloat(priceStr.replace(/\./g, '').replace(',', '.'));
+                    } else if (priceStr.match(/^\d{1,3}(,\d{3})*\.\d{2}$/)) {
+                        numericValue = parseFloat(priceStr.replace(/,/g, ''));
+                    } else if (priceStr.includes(',')) {
+                        numericValue = parseFloat(priceStr.replace(',', '.'));
+                    } else {
+                        numericValue = parseFloat(priceStr);
+                    }
+                    if (isNaN(numericValue)) numericValue = 0;
+
+                    // Land aus Location
+                    let country = 'N/A';
+                    if (row.location) {
+                        const parts = row.location.split(',');
+                        country = parts[parts.length - 1].trim();
+                    }
+
+                    mergedRows.push({
+                        productName: row.productName,
+                        manufacturer: row.oem,
+                        serialNumbers: row.serial ? [row.serial] : [],
+                        sla: row.sla,
+                        country,
+                        startDate: row.startDate,
+                        endDate: row.endDate,
+                        purchaseCost: numericValue.toFixed(2),
+                        unitPrice: (numericValue * multiplier).toFixed(2),
+                        includedItems: {},
+                        count: 1
+                    });
+                }
+            }
+
+            // Gruppieren nach gleichen Eigenschaften
+            const finalMap = {};
+            mergedRows.forEach(row => {
+                const incParts = Object.entries(row.includedItems).map(([n, q]) => `${q}x${n}`).sort().join('|');
+                const key = `${row.productName}|${row.manufacturer}|${row.unitPrice}|${row.purchaseCost}|${row.sla}|${row.country}|${row.startDate}|${row.endDate}|${incParts}`;
+                if (finalMap[key]) {
+                    finalMap[key].serialNumbers = finalMap[key].serialNumbers.concat(row.serialNumbers);
+                    finalMap[key].count += row.count;
+                    Object.entries(row.includedItems).forEach(([n, q]) => {
+                        finalMap[key].includedItems[n] = (finalMap[key].includedItems[n] || 0) + q;
+                    });
+                } else {
+                    finalMap[key] = { ...row, serialNumbers: row.serialNumbers.slice(), includedItems: { ...row.includedItems } };
+                }
+            });
+
+            generateParkplacePdfTable(Object.values(finalMap));
+        }
+
+        function formatDate(dateStr) {
+            // DD-MMM-YYYY -> DD.MM.YYYY
+            if (!dateStr) return 'n.a.';
+            const months = { Jan: '01', Feb: '02', Mar: '03', Apr: '04', May: '05', Jun: '06', Jul: '07', Aug: '08', Sep: '09', Oct: '10', Nov: '11', Dec: '12' };
+            const match = dateStr.match(/(\d{2})-([A-Za-z]{3})-(\d{4})/);
+            if (match) {
+                return `${match[1]}.${months[match[2]] || '01'}.${match[3]}`;
+            }
+            return dateStr;
+        }
+
+        function calculateDuration(start, end) {
+            if (!start || !end || start === 'n.a.' || end === 'n.a.') return 12;
+            const startFmt = formatDate(start);
+            const endFmt = formatDate(end);
+            const [d1, m1, y1] = startFmt.split('.');
+            const [d2, m2, y2] = endFmt.split('.');
+            const dtStart = new Date(`${y1}-${m1}-${d1}`);
+            const dtEnd = new Date(`${y2}-${m2}-${d2}`);
+            if (isNaN(dtStart) || isNaN(dtEnd)) return 12;
+            let months = (dtEnd.getFullYear() - dtStart.getFullYear()) * 12 + (dtEnd.getMonth() - dtStart.getMonth());
+            if (dtEnd.getDate() >= 15) months++;
+            return months > 0 ? months : 1;
+        }
+
+        function generateParkplacePdfTable(data) {
+            const tbody = document.querySelector('#pppdf-table tbody');
+            tbody.innerHTML = '';
+
+            data.forEach(item => {
+                const validSerials = item.serialNumbers.filter(sn => sn && sn.toLowerCase() !== 'n.a.' && sn.trim() !== '');
+                const descLines = [];
+                if (validSerials.length > 0) descLines.push(`S/N: ${validSerials.join(', ')}`);
+                const inclNames = Object.keys(item.includedItems);
+                if (inclNames.length > 0) {
+                    descLines.push('incl.:');
+                    inclNames.forEach(name => descLines.push(`${item.includedItems[name]}x ${name}`));
+                }
+                descLines.push(`Service Start: ${formatDate(item.startDate)}`);
+                descLines.push(`Service Ende: ${formatDate(item.endDate)}`);
+                const description = descLines.join('\n');
+                const duration = calculateDuration(item.startDate, item.endDate);
+
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td contenteditable="true">${item.productName}</td>
+                    <td>1</td>
+                    <td contenteditable="true">${item.manufacturer}</td>
+                    <td>Wartung</td>
+                    <td>Park Place Technologies GmbH</td>
+                    <td contenteditable="true">${item.unitPrice}</td>
+                    <td>999</td>
+                    <td>Team Wartung</td>
+                    <td contenteditable="true" style="white-space:pre-wrap;">${description}</td>
+                    <td contenteditable="true">${item.purchaseCost}</td>
+                    <td><input type="text" value="${item.sla}" class="pppdf-sla-input" style="width:100%;"></td>
+                    <td><input type="text" value="${item.country}" class="pppdf-country-input" style="width:100%;"></td>
+                    <td contenteditable="true">${duration}</td>
+                    <td>${item.count}</td>
+                    <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+        }
+
+        document.getElementById('pppdf-apply-country').addEventListener('click', () => {
+            const val = document.getElementById('pppdf-country').value;
+            if (val) document.querySelectorAll('.pppdf-country-input').forEach(i => i.value = val);
+        });
+        document.getElementById('pppdf-apply-sla').addEventListener('click', () => {
+            const val = document.getElementById('pppdf-sla').value;
+            if (val) document.querySelectorAll('.pppdf-sla-input').forEach(i => i.value = val);
+        });
+        document.getElementById('pppdf-update-price').addEventListener('click', () => {
+            const multiplier = parseFloat(document.getElementById('pppdf-multiplier').value) || 1.84;
+            document.querySelectorAll('#pppdf-table tbody tr').forEach(row => {
+                const purchaseCost = parseFloat(row.cells[9].textContent.replace(',', '.')) || 0;
+                row.cells[5].textContent = (purchaseCost * multiplier).toFixed(2);
+            });
+        });
+
+        document.getElementById('pppdf-download').addEventListener('click', () => {
+            const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months"];
+            const csvRows = [headers.join(';')];
+
+            document.querySelectorAll('#pppdf-table tbody tr').forEach(row => {
+                const cells = row.cells;
+                csvRows.push([
+                    cells[0].textContent, cells[1].textContent, cells[2].textContent,
+                    cells[3].textContent, cells[4].textContent, cells[5].textContent,
+                    cells[6].textContent, cells[7].textContent,
+                    `"${cells[8].textContent}"`,
+                    cells[9].textContent,
+                    cells[10].querySelector('input').value,
+                    cells[11].querySelector('input').value,
+                    cells[12].textContent
+                ].join(';'));
+            });
+            downloadCSV(csvRows, 'parkplace_pdf_import.csv');
+        });
+    }
+
+    // ============================================
     // INITIALISIERUNG
     // ============================================
     function init() {
@@ -1473,6 +1899,7 @@
         initTechnogroup();
         initTechnogroupPDF();
         initParkplace();
+        initParkplacePDF();
     }
 
     // Warten bis DOM vollstaendig geladen
