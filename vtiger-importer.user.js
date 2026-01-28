@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.3.0
+// @version      1.4.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
 // @grant        none
 // @require      https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js
 // @require      https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.14.305/pdf.min.js
+// @require      https://unpkg.com/msgreader@1.0.1/dist/MsgReader.js
 // @updateURL    https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer.user.js
 // @downloadURL  https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer.user.js
 // ==/UserScript==
@@ -442,6 +443,120 @@
         });
 
         return newLang;
+    }
+
+    // ============================================
+    // MSG-DATEI LESEN (Outlook E-Mails)
+    // ============================================
+    async function readMsgFile(file) {
+        return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const arrayBuffer = e.target.result;
+                    const msgReader = new MsgReader(arrayBuffer);
+                    const fileData = msgReader.getFileData();
+
+                    // E-Mail-Daten extrahieren
+                    const result = {
+                        subject: fileData.subject || '',
+                        from: fileData.senderName || fileData.senderEmail || '',
+                        body: fileData.body || '',
+                        bodyHTML: fileData.bodyHTML || '',
+                        attachments: fileData.attachments || []
+                    };
+
+                    // Wenn HTML vorhanden, versuche Text zu extrahieren
+                    if (!result.body && result.bodyHTML) {
+                        const temp = document.createElement('div');
+                        temp.innerHTML = result.bodyHTML;
+                        result.body = temp.textContent || temp.innerText || '';
+                    }
+
+                    console.log('MSG-Datei gelesen:', result.subject);
+                    console.log('Body:', result.body.substring(0, 500) + '...');
+
+                    resolve(result);
+                } catch (error) {
+                    console.error('Fehler beim Lesen der MSG-Datei:', error);
+                    reject(error);
+                }
+            };
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
+    }
+
+    // Parkplace-Daten aus E-Mail-Text extrahieren
+    function parseParkplaceFromEmail(emailBody) {
+        const lines = emailBody.split('\n').map(l => l.trim()).filter(l => l);
+        const dataRows = [];
+
+        // Bekannte OEMs
+        const knownOEMs = ['NetApp', 'Dell', 'HP', 'HPE', 'IBM', 'Cisco', 'EMC', 'Fujitsu', 'Lenovo', 'Sun', 'Oracle', 'Hitachi', 'Pure Storage', 'Nimble'];
+        const datePattern = /(\d{2}-[A-Za-z]{3}-\d{4})/g;
+        const pricePattern = /€\s*([\d.,]+)/;
+        const lineNumPattern = /^(\d+\.\d+\.?\d*\.?\d*)\s+/;
+        const slaPattern = /(\d+x\d+x\w+)/i;
+
+        for (const line of lines) {
+            const lineMatch = line.match(lineNumPattern);
+            if (!lineMatch) continue;
+            if (line.includes('Grand Total')) break;
+
+            const lineNum = lineMatch[1];
+            let oem = 'N/A';
+            for (const m of knownOEMs) {
+                if (line.includes(m)) { oem = m; break; }
+            }
+
+            let total = '0';
+            const priceMatch = line.match(pricePattern);
+            if (priceMatch) total = '€' + priceMatch[1];
+            else if (line.toLowerCase().includes('included')) total = 'Included';
+
+            const dates = line.match(datePattern) || [];
+            const startDate = dates[0] || '';
+            const endDate = dates[1] || '';
+
+            let sla = 'N/A';
+            const slaMatch = line.match(slaPattern);
+            if (slaMatch) sla = slaMatch[1];
+
+            // Seriennummer
+            let serial = '';
+            const serialCandidates = line.match(/\b([A-Z0-9]{8,20})\b/gi) || [];
+            for (const c of serialCandidates) {
+                if (!/\d{2}-[A-Za-z]{3}-\d{4}/.test(c) && !/\d+x\d+x/i.test(c)) {
+                    serial = c; break;
+                }
+            }
+
+            // Location
+            let location = '';
+            const locMatch = line.match(/([A-Za-z\s]+,\s*[A-Za-z]+)\s+\d{2}-/);
+            if (locMatch) location = locMatch[1].trim();
+
+            // Produktname
+            let productName = 'N/A';
+            if (oem !== 'N/A') {
+                const oemIdx = line.indexOf(oem);
+                let afterOem = line.substring(oemIdx + oem.length).trim();
+                const stopPatterns = [/Parts Tech/i, /ParkView/i, /\d+x\d+x\w+/i, /\d{2}-[A-Za-z]{3}-\d{4}/];
+                for (const pattern of stopPatterns) {
+                    const match = afterOem.search(pattern);
+                    if (match > 0) { afterOem = afterOem.substring(0, match).trim(); break; }
+                }
+                productName = afterOem.replace(/Parts Tech & Labor/gi, '').trim() || 'N/A';
+            }
+
+            dataRows.push({
+                line: lineNum, oem, productName, sla, serial,
+                qty: 1, location, startDate, endDate, total
+            });
+        }
+
+        return dataRows;
     }
 
     // ============================================
@@ -1564,10 +1679,10 @@
     function initParkplacePDF() {
         const panel = document.getElementById('panel-parkplace-pdf');
         panel.innerHTML = `
-            <h3>Parkplace PDF Importer</h3>
+            <h3>Parkplace PDF / E-Mail Importer</h3>
             <div class="imp-form-group">
-                <input type="file" id="pppdf-file" accept="application/pdf" class="imp-hidden">
-                <div class="imp-drop-zone" id="pppdf-dropzone">PDF hierher ziehen oder klicken</div>
+                <input type="file" id="pppdf-file" accept="application/pdf,.msg" class="imp-hidden">
+                <div class="imp-drop-zone" id="pppdf-dropzone">PDF oder MSG-Datei hierher ziehen oder klicken</div>
             </div>
             <div class="imp-row-grid">
                 <div class="imp-form-group">
@@ -1624,13 +1739,99 @@
 
         fileInput.addEventListener('change', async () => {
             const file = fileInput.files[0];
-            if (!file || file.type !== 'application/pdf') {
-                alert('Bitte eine PDF-Datei auswaehlen.');
+            if (!file) {
+                alert('Bitte eine Datei auswaehlen.');
                 return;
             }
+
             dropZone.textContent = file.name;
-            await processParkplacePdf(file);
+
+            // Dateityp erkennen
+            const fileName = file.name.toLowerCase();
+            if (fileName.endsWith('.msg')) {
+                await processParkplaceMsg(file);
+            } else if (fileName.endsWith('.pdf') || file.type === 'application/pdf') {
+                await processParkplacePdf(file);
+            } else {
+                alert('Bitte eine PDF- oder MSG-Datei auswaehlen.');
+            }
         });
+
+        async function processParkplaceMsg(file) {
+            try {
+                const emailData = await readMsgFile(file);
+                const dataRows = parseParkplaceFromEmail(emailData.body);
+
+                if (dataRows.length === 0) {
+                    alert('Keine Parkplace-Daten in der E-Mail gefunden.\\nBitte pruefen Sie das Format.');
+                    console.log('E-Mail Body:', emailData.body);
+                    return;
+                }
+
+                // Verarbeitung wie bei PDF
+                const multiplier = parseFloat(document.getElementById('pppdf-multiplier').value) || 1.84;
+                const mergedRows = [];
+
+                for (const row of dataRows) {
+                    const isIncluded = row.total.toLowerCase() === 'included';
+
+                    if (isIncluded) {
+                        if (mergedRows.length > 0) {
+                            const lastRow = mergedRows[mergedRows.length - 1];
+                            lastRow.includedItems[row.productName] = (lastRow.includedItems[row.productName] || 0) + row.qty;
+                            if (row.serial) lastRow.serialNumbers.push(row.serial);
+                        }
+                    } else {
+                        let numericValue = 0;
+                        const priceStr = row.total.replace(/[^0-9,.\-]/g, '').trim();
+                        if (priceStr.includes(',')) {
+                            numericValue = parseFloat(priceStr.replace('.', '').replace(',', '.'));
+                        } else {
+                            numericValue = parseFloat(priceStr);
+                        }
+                        if (isNaN(numericValue)) numericValue = 0;
+
+                        let country = 'N/A';
+                        if (row.location) {
+                            const parts = row.location.split(',');
+                            country = parts[parts.length - 1].trim();
+                        }
+
+                        mergedRows.push({
+                            productName: row.productName,
+                            manufacturer: row.oem,
+                            serialNumbers: row.serial ? [row.serial] : [],
+                            sla: row.sla,
+                            country,
+                            startDate: row.startDate,
+                            endDate: row.endDate,
+                            purchaseCost: numericValue.toFixed(2),
+                            unitPrice: (numericValue * multiplier).toFixed(2),
+                            includedItems: {},
+                            count: 1
+                        });
+                    }
+                }
+
+                // Gruppieren
+                const finalMap = {};
+                mergedRows.forEach(row => {
+                    const incParts = Object.entries(row.includedItems).map(([n, q]) => `${q}x${n}`).sort().join('|');
+                    const key = `${row.productName}|${row.manufacturer}|${row.unitPrice}|${row.sla}|${row.country}|${row.startDate}|${row.endDate}|${incParts}`;
+                    if (finalMap[key]) {
+                        finalMap[key].serialNumbers = finalMap[key].serialNumbers.concat(row.serialNumbers);
+                        finalMap[key].count += row.count;
+                    } else {
+                        finalMap[key] = { ...row, serialNumbers: row.serialNumbers.slice() };
+                    }
+                });
+
+                generateParkplacePdfTable(Object.values(finalMap));
+            } catch (error) {
+                alert('Fehler beim Lesen der MSG-Datei: ' + error.message);
+                console.error(error);
+            }
+        }
 
         async function processParkplacePdf(file) {
             const arrayBuffer = await file.arrayBuffer();
