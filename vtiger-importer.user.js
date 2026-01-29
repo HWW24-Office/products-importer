@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.5.0
+// @version      1.6.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -352,6 +352,88 @@
         "CH": "Schweiz"
     };
 
+    // ============================================
+    // LAENDER-NORMALISIERUNG UND UEBERSETZUNG
+    // ============================================
+    const countryNormalization = {
+        // USA-Varianten
+        'united states': 'USA', 'united states of america': 'USA', 'us': 'USA', 'u.s.': 'USA', 'u.s.a.': 'USA',
+        'vereinigte staaten': 'USA', 'vereinigte staaten von amerika': 'USA',
+        // UK-Varianten
+        'united kingdom': 'UK', 'great britain': 'UK', 'gb': 'UK', 'großbritannien': 'UK', 'grossbritannien': 'UK', 'england': 'UK',
+        // UAE-Varianten
+        'united arab emirates': 'UAE', 'vereinigte arabische emirate': 'UAE', 'vae': 'UAE', 'v.a.e.': 'UAE',
+        // Deutschland-Varianten
+        'germany': 'Germany', 'deutschland': 'Germany', 'de': 'Germany', 'ger': 'Germany',
+        // Oesterreich-Varianten
+        'austria': 'Austria', 'oesterreich': 'Austria', 'österreich': 'Austria', 'at': 'Austria', 'aut': 'Austria',
+        // Schweiz-Varianten
+        'switzerland': 'Switzerland', 'schweiz': 'Switzerland', 'suisse': 'Switzerland', 'svizzera': 'Switzerland', 'ch': 'Switzerland',
+        // Weitere Laender
+        'france': 'France', 'frankreich': 'France', 'fr': 'France',
+        'netherlands': 'Netherlands', 'niederlande': 'Netherlands', 'holland': 'Netherlands', 'nl': 'Netherlands',
+        'belgium': 'Belgium', 'belgien': 'Belgium', 'be': 'Belgium',
+        'spain': 'Spain', 'spanien': 'Spain', 'es': 'Spain',
+        'italy': 'Italy', 'italien': 'Italy', 'it': 'Italy',
+        'poland': 'Poland', 'polen': 'Poland', 'pl': 'Poland',
+        'czech republic': 'Czech Republic', 'tschechien': 'Czech Republic', 'tschechische republik': 'Czech Republic', 'cz': 'Czech Republic',
+        'hungary': 'Hungary', 'ungarn': 'Hungary', 'hu': 'Hungary',
+        'romania': 'Romania', 'rumaenien': 'Romania', 'rumänien': 'Romania', 'ro': 'Romania',
+        'sweden': 'Sweden', 'schweden': 'Sweden', 'se': 'Sweden',
+        'denmark': 'Denmark', 'daenemark': 'Denmark', 'dänemark': 'Denmark', 'dk': 'Denmark',
+        'norway': 'Norway', 'norwegen': 'Norway', 'no': 'Norway',
+        'finland': 'Finland', 'finnland': 'Finland', 'fi': 'Finland'
+    };
+
+    const countryTranslations = {
+        // Normalisierter Name -> { en: englisch, de: deutsch }
+        'USA': { en: 'USA', de: 'USA' },
+        'UK': { en: 'UK', de: 'UK' },
+        'UAE': { en: 'UAE', de: 'UAE' },
+        'Germany': { en: 'Germany', de: 'Deutschland' },
+        'Austria': { en: 'Austria', de: 'Oesterreich' },
+        'Switzerland': { en: 'Switzerland', de: 'Schweiz' },
+        'France': { en: 'France', de: 'Frankreich' },
+        'Netherlands': { en: 'Netherlands', de: 'Niederlande' },
+        'Belgium': { en: 'Belgium', de: 'Belgien' },
+        'Spain': { en: 'Spain', de: 'Spanien' },
+        'Italy': { en: 'Italy', de: 'Italien' },
+        'Poland': { en: 'Poland', de: 'Polen' },
+        'Czech Republic': { en: 'Czech Republic', de: 'Tschechien' },
+        'Hungary': { en: 'Hungary', de: 'Ungarn' },
+        'Romania': { en: 'Romania', de: 'Rumaenien' },
+        'Sweden': { en: 'Sweden', de: 'Schweden' },
+        'Denmark': { en: 'Denmark', de: 'Daenemark' },
+        'Norway': { en: 'Norway', de: 'Norwegen' },
+        'Finland': { en: 'Finland', de: 'Finnland' }
+    };
+
+    // Normalisiert Laendernamen auf standardisierte Form
+    function normalizeCountry(countryName) {
+        if (!countryName) return countryName;
+        const trimmed = countryName.trim();
+        const lower = trimmed.toLowerCase();
+
+        // Bereits normalisiert?
+        if (countryTranslations[trimmed]) return trimmed;
+
+        // Suche in Normalisierungstabelle
+        if (countryNormalization[lower]) return countryNormalization[lower];
+
+        // Keine Uebereinstimmung - original zurueckgeben
+        return trimmed;
+    }
+
+    // Gibt den Laendernamen in der gewuenschten Sprache zurueck
+    function getCountryForLanguage(countryName, language) {
+        const normalized = normalizeCountry(countryName);
+        const translation = countryTranslations[normalized];
+        if (translation) {
+            return translation[language] || normalized;
+        }
+        return countryName; // Unbekanntes Land - unuebersetzt lassen
+    }
+
     function setupDropZone(dropZone, fileInput) {
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -383,21 +465,17 @@
     // ============================================
     // SPRACH-UMSCHALTUNG (DE <-> EN)
     // ============================================
-    const translationMap = {
-        // Laender
-        'Deutschland': 'Germany',
-        'Germany': 'Deutschland',
-        'Oesterreich': 'Austria',
-        'Österreich': 'Austria',
-        'Austria': 'Oesterreich',
-        'Schweiz': 'Switzerland',
-        'Switzerland': 'Schweiz',
-        // Description-Texte
+    const descriptionTranslations = {
+        // Description-Texte DE -> EN
         'inkl.:': 'incl.:',
-        'incl.:': 'inkl.:',
         'Service Ende:': 'Service End:',
+        'Laufzeit:': 'Duration:',
+        'Monate': 'months',
+        // EN -> DE
+        'incl.:': 'inkl.:',
         'Service End:': 'Service Ende:',
-        'Service Start:': 'Service Start:', // bleibt gleich
+        'Duration:': 'Laufzeit:',
+        'months': 'Monate'
     };
 
     function toggleLanguage(tableId, countryInputClass, currentLang) {
@@ -405,13 +483,11 @@
         const tbody = document.querySelector(`#${tableId} tbody`);
         if (!tbody) return newLang;
 
-        // Country-Inputs uebersetzen
+        // Country-Inputs uebersetzen (verwendet neue Normalisierung)
         if (countryInputClass) {
             document.querySelectorAll(`.${countryInputClass}`).forEach(input => {
                 const val = input.value.trim();
-                if (translationMap[val]) {
-                    input.value = translationMap[val];
-                }
+                input.value = getCountryForLanguage(val, newLang);
             });
         }
 
@@ -420,21 +496,33 @@
             const descCell = row.cells[8];
             if (descCell) {
                 let text = descCell.innerHTML;
-                // Ersetze alle bekannten Begriffe
-                Object.entries(translationMap).forEach(([from, to]) => {
-                    // Nur in eine Richtung je nach aktueller Sprache
+                // Ersetze Description-Begriffe je nach Richtung
+                Object.entries(descriptionTranslations).forEach(([from, to]) => {
                     if (currentLang === 'de') {
                         // DE -> EN
-                        if (from === 'inkl.:' || from === 'Service Ende:') {
+                        if (from === 'inkl.:' || from === 'Service Ende:' || from === 'Laufzeit:' || from === 'Monate') {
                             text = text.split(from).join(to);
                         }
                     } else {
                         // EN -> DE
-                        if (from === 'incl.:' || from === 'Service End:') {
+                        if (from === 'incl.:' || from === 'Service End:' || from === 'Duration:' || from === 'months') {
                             text = text.split(from).join(to);
                         }
                     }
                 });
+
+                // Auch Laendernamen in Description uebersetzen
+                Object.keys(countryTranslations).forEach(normalized => {
+                    const trans = countryTranslations[normalized];
+                    if (currentLang === 'de' && trans.de !== trans.en) {
+                        // DE -> EN: z.B. "Deutschland" -> "Germany"
+                        text = text.split(trans.de).join(trans.en);
+                    } else if (currentLang === 'en' && trans.de !== trans.en) {
+                        // EN -> DE: z.B. "Germany" -> "Deutschland"
+                        text = text.split(trans.en).join(trans.de);
+                    }
+                });
+
                 descCell.innerHTML = text;
             }
 
@@ -442,9 +530,7 @@
             const countryCell = row.cells[11];
             if (countryCell && !countryCell.querySelector('input')) {
                 const val = countryCell.textContent.trim();
-                if (translationMap[val]) {
-                    countryCell.textContent = translationMap[val];
-                }
+                countryCell.textContent = getCountryForLanguage(val, newLang);
             }
         });
 
@@ -1157,6 +1243,7 @@
                     <label>Manufacturer:</label>
                     <input type="text" id="tgpdf-manufacturer" placeholder="Hersteller">
                     <button id="tgpdf-apply-manufacturer">Anwenden</button>
+                    <button id="tgpdf-search-manufacturer" style="margin-top:5px;">Manufacturer suchen</button>
                 </div>
                 <div class="imp-form-group">
                     <label>Land:</label>
@@ -1345,8 +1432,10 @@
         function generateTable(data) {
             const tbody = document.querySelector('#tgpdf-table tbody');
             const multiplier = parseFloat(document.getElementById('tgpdf-multiplier').value) || 1.84;
-            const country = document.getElementById('tgpdf-country').value || 'Deutschland';
+            const countryInput = document.getElementById('tgpdf-country').value || 'Deutschland';
             const manufacturer = document.getElementById('tgpdf-manufacturer').value || '';
+            // Normalisiere das Land
+            const country = getCountryForLanguage(normalizeCountry(countryInput), 'de');
             tbody.innerHTML = '';
 
             data.forEach((item, index) => {
@@ -1379,6 +1468,28 @@
         document.getElementById('tgpdf-apply-manufacturer').addEventListener('click', () => {
             const val = document.getElementById('tgpdf-manufacturer').value;
             document.querySelectorAll('.tgpdf-manufacturer-input').forEach(i => i.value = val);
+        });
+        document.getElementById('tgpdf-search-manufacturer').addEventListener('click', () => {
+            // Sammle alle Product Names aus der Tabelle
+            const productNames = [];
+            document.querySelectorAll('#tgpdf-table tbody tr').forEach(row => {
+                const productName = row.cells[0].textContent.trim();
+                if (productName && productName !== 'N/A') {
+                    productNames.push(productName);
+                }
+            });
+
+            if (productNames.length === 0) {
+                alert('Keine Produkte in der Tabelle. Bitte zuerst ein PDF laden.');
+                return;
+            }
+
+            // Nehme den ersten Produktnamen fuer die Suche
+            const searchTerm = productNames[0];
+            // Erstelle Google-Suche URL
+            const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm + ' manufacturer')}`;
+            // Oeffne in neuem Tab
+            window.open(searchUrl, '_blank');
         });
         document.getElementById('tgpdf-apply-country').addEventListener('click', () => {
             const val = document.getElementById('tgpdf-country').value;
@@ -2289,10 +2400,11 @@
 
         function parseDisPdf(rawText) {
             const items = [];
+            const lines = rawText.split('\n').map(l => l.trim());
 
-            // Extract Laufzeit from *** Laufzeit: ... ***
+            // Extract Laufzeit from *** Laufzeit: ... *** or similar patterns
             let globalDuration = 12;
-            const durationMatch = rawText.match(/\*{3}\s*Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)\s*\*{3}/i);
+            const durationMatch = rawText.match(/(?:\*{3}\s*)?Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)(?:\s*\*{3})?/i);
             if (durationMatch) {
                 globalDuration = parseInt(durationMatch[1], 10);
             }
@@ -2306,19 +2418,12 @@
                 const servicezeit = serviceZeitenMatch[1].trim().toLowerCase();
                 const reaktion = reaktionszeitMatch[1].trim().toLowerCase();
 
-                // Map to standard SLA format
                 if (servicezeit.includes('24x7') || servicezeit.includes('24/7')) {
-                    if (reaktion.includes('4') || reaktion.includes('vier')) {
-                        globalSla = '7x24x4';
-                    } else if (reaktion.includes('nbd') || reaktion.includes('next business')) {
-                        globalSla = '7x24xNBD';
-                    }
+                    if (reaktion.includes('4') || reaktion.includes('vier')) globalSla = '7x24x4';
+                    else if (reaktion.includes('nbd') || reaktion.includes('next business')) globalSla = '7x24xNBD';
                 } else if (servicezeit.includes('5x9') || servicezeit.includes('10x5') || servicezeit.includes('mo-fr')) {
-                    if (reaktion.includes('4') || reaktion.includes('vier')) {
-                        globalSla = '5x9x4';
-                    } else if (reaktion.includes('nbd') || reaktion.includes('next business')) {
-                        globalSla = '5x9xNBD';
-                    }
+                    if (reaktion.includes('4') || reaktion.includes('vier')) globalSla = '5x9x4';
+                    else if (reaktion.includes('nbd') || reaktion.includes('next business')) globalSla = '5x9xNBD';
                 }
             }
 
@@ -2326,105 +2431,189 @@
             let country = 'Deutschland';
             const locationMatch = rawText.match(/(?:Standort|Location|Endkunde):\s*([^\n]+)/i);
             if (locationMatch) {
-                country = locationMatch[1].trim();
+                country = normalizeCountry(locationMatch[1].trim());
             }
 
-            // Find product blocks - typically structured with S/N: or Seriennummer:
-            const productBlocks = rawText.split(/(?=(?:S\/N:|SN:|Seriennummer:))/i);
+            // DIS PDF Format:
+            // - Zeile mit "Artikel Nr." enthaelt Menge, Einzelpreis, Gesamtpreis
+            // - Zeile darunter: Manufacturer und Product Name unter "Bezeichnung"
+            // - 1-2 Zeilen darunter: Seriennummern (S/N:)
 
-            productBlocks.forEach(block => {
-                if (!block.trim()) return;
+            // Suche nach Artikelzeilen (beginnt oft mit Artikelnummer-Pattern)
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
 
-                // Extract serial number
-                const snMatch = block.match(/(?:S\/N:|SN:|Seriennummer:)\s*([A-Za-z0-9]+)/i);
-                if (!snMatch) return;
+                // Erkenne Artikelzeile: enthaelt typischerweise Menge und Preise
+                // Format: [Artikel Nr.] [Menge] [ME] [Einzelpreis] [Gesamtpreis]
+                // Oder: Zeile enthaelt numerische Werte fuer Preise
+                const artikelMatch = line.match(/^(\d{4,}|\d+-\d+)\s+.*?(\d+)\s+(?:St(?:ck?|ück)?|ME|PC)?\s*(\d+[.,]\d{2})\s*€?\s*(\d+[.,]\d{2})\s*€?$/i);
 
-                const serial = snMatch[1].trim();
+                if (artikelMatch) {
+                    const menge = parseInt(artikelMatch[2], 10) || 1;
+                    let einzelpreis = artikelMatch[3].replace('.', '').replace(',', '.');
+                    let gesamtpreis = artikelMatch[4].replace('.', '').replace(',', '.');
 
-                // Extract product name - usually before the serial number or in nearby lines
-                let productName = 'N/A';
-                const lines = block.split('\n').map(l => l.trim()).filter(l => l);
+                    einzelpreis = parseFloat(einzelpreis) || 0;
+                    gesamtpreis = parseFloat(gesamtpreis) || 0;
 
-                // Look for product identifiers
-                for (const line of lines) {
-                    // Skip lines that are just serial numbers or prices
-                    if (/^(?:S\/N:|SN:|Seriennummer:)/i.test(line)) continue;
-                    if (/^\d+[.,]\d{2}\s*€?$/.test(line)) continue;
-                    if (/^Pos\.?\s*\d+/i.test(line)) continue;
+                    // Naechste Zeile(n) fuer Bezeichnung (Manufacturer + Product Name)
+                    let productName = 'N/A';
+                    let manufacturer = '';
+                    let serials = [];
 
-                    // Look for product patterns like model numbers
-                    const modelMatch = line.match(/([A-Z]{2,}[\s-]?[A-Z0-9-]+)/);
-                    if (modelMatch && modelMatch[1].length > 3) {
-                        productName = modelMatch[1].trim();
-                        break;
+                    // Suche in den naechsten Zeilen nach Bezeichnung und S/N
+                    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+                        const nextLine = lines[j];
+
+                        // Seriennummer gefunden?
+                        const snMatch = nextLine.match(/(?:S\/N:|SN:|Seriennummer:)\s*(.+)/i);
+                        if (snMatch) {
+                            // Sammle alle Seriennummern (komma- oder leerzeichengetrennt)
+                            const snText = snMatch[1].trim();
+                            const snParts = snText.split(/[,\s]+/).filter(s => s && s.length > 3);
+                            serials.push(...snParts);
+                            continue;
+                        }
+
+                        // Neue Artikelzeile? -> Stop
+                        if (/^(\d{4,}|\d+-\d+)\s+.*?\d+[.,]\d{2}/.test(nextLine)) break;
+
+                        // Bezeichnungszeile (Manufacturer + Product Name)
+                        if (!productName || productName === 'N/A') {
+                            // Versuche Manufacturer und Product zu extrahieren
+                            // Format oft: "Hersteller Modellnummer" oder "Hersteller - Modellnummer"
+                            const parts = nextLine.split(/\s+[-–]\s+|\s{2,}/);
+                            if (parts.length >= 2) {
+                                manufacturer = parts[0].trim();
+                                productName = parts.slice(1).join(' ').trim();
+                            } else if (nextLine.length > 3 && !/^(Pos|Art|Artikel|Menge|ME|St)/i.test(nextLine)) {
+                                productName = nextLine.trim();
+                            }
+                        }
+                    }
+
+                    // Falls keine Seriennummern gefunden, suche weiter
+                    if (serials.length === 0) {
+                        for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+                            const snMatch = lines[j].match(/(?:S\/N:|SN:|Seriennummer:)\s*(.+)/i);
+                            if (snMatch) {
+                                const snText = snMatch[1].trim();
+                                const snParts = snText.split(/[,\s]+/).filter(s => s && s.length > 3);
+                                serials.push(...snParts);
+                            }
+                        }
+                    }
+
+                    if (productName !== 'N/A' || serials.length > 0) {
+                        items.push({
+                            productName: productName || 'N/A',
+                            manufacturer,
+                            serials: serials.length > 0 ? serials : ['n.a.'],
+                            sla: globalSla,
+                            country,
+                            duration: globalDuration,
+                            purchaseCost: einzelpreis,
+                            menge
+                        });
                     }
                 }
+            }
 
-                // Extract price
-                let price = 0;
-                const priceMatches = block.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€?/g);
-                if (priceMatches && priceMatches.length > 0) {
-                    const lastPrice = priceMatches[priceMatches.length - 1];
-                    let cleanPrice = lastPrice.replace(/[€\s]/g, '').trim();
-                    // Handle German number format
-                    if (cleanPrice.includes(',') && cleanPrice.indexOf(',') > cleanPrice.lastIndexOf('.')) {
-                        cleanPrice = cleanPrice.replace(/\./g, '').replace(',', '.');
-                    } else if (cleanPrice.includes('.') && cleanPrice.indexOf('.') > cleanPrice.lastIndexOf(',')) {
-                        cleanPrice = cleanPrice.replace(/,/g, '');
+            // Fallback: Wenn keine Artikel gefunden, versuche altes S/N-basiertes Parsing
+            if (items.length === 0) {
+                const productBlocks = rawText.split(/(?=(?:S\/N:|SN:|Seriennummer:))/i);
+
+                productBlocks.forEach(block => {
+                    if (!block.trim()) return;
+
+                    const snMatch = block.match(/(?:S\/N:|SN:|Seriennummer:)\s*([A-Za-z0-9-]+)/i);
+                    if (!snMatch) return;
+
+                    const serial = snMatch[1].trim();
+                    let productName = 'N/A';
+                    const blockLines = block.split('\n').map(l => l.trim()).filter(l => l);
+
+                    for (const bLine of blockLines) {
+                        if (/^(?:S\/N:|SN:|Seriennummer:)/i.test(bLine)) continue;
+                        if (/^\d+[.,]\d{2}\s*€?$/.test(bLine)) continue;
+
+                        const modelMatch = bLine.match(/([A-Z][A-Za-z0-9-]+(?:\s+[A-Z0-9-]+)+)/);
+                        if (modelMatch && modelMatch[1].length > 3) {
+                            productName = modelMatch[1].trim();
+                            break;
+                        }
                     }
-                    price = parseFloat(cleanPrice) || 0;
-                }
 
-                items.push({
-                    productName,
-                    serial,
-                    sla: globalSla,
-                    country,
-                    duration: globalDuration,
-                    purchaseCost: price
+                    let price = 0;
+                    const priceMatches = block.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€?/g);
+                    if (priceMatches && priceMatches.length > 0) {
+                        const lastPrice = priceMatches[priceMatches.length - 1];
+                        let cleanPrice = lastPrice.replace(/[€\s]/g, '').trim();
+                        if (cleanPrice.includes(',') && cleanPrice.indexOf(',') > cleanPrice.lastIndexOf('.')) {
+                            cleanPrice = cleanPrice.replace(/\./g, '').replace(',', '.');
+                        } else if (cleanPrice.includes('.') && cleanPrice.indexOf('.') > cleanPrice.lastIndexOf(',')) {
+                            cleanPrice = cleanPrice.replace(/,/g, '');
+                        }
+                        price = parseFloat(cleanPrice) || 0;
+                    }
+
+                    items.push({
+                        productName,
+                        manufacturer: '',
+                        serials: [serial],
+                        sla: globalSla,
+                        country,
+                        duration: globalDuration,
+                        purchaseCost: price,
+                        menge: 1
+                    });
                 });
-            });
 
-            // Group by product name
-            const grouped = {};
-            items.forEach(item => {
-                const key = `${item.productName}|${item.sla}|${item.purchaseCost}`;
-                if (!grouped[key]) {
-                    grouped[key] = { ...item, serials: [], count: 0 };
-                }
-                grouped[key].serials.push(item.serial);
-                grouped[key].count++;
-            });
+                // Gruppieren nach Produktname
+                const grouped = {};
+                items.forEach(item => {
+                    const key = `${item.productName}|${item.sla}|${item.purchaseCost}`;
+                    if (!grouped[key]) {
+                        grouped[key] = { ...item, serials: [] };
+                    }
+                    grouped[key].serials.push(...item.serials);
+                });
+                return Object.values(grouped);
+            }
 
-            return Object.values(grouped);
+            return items;
         }
 
         function generateDisTable(data) {
             const tbody = document.querySelector('#dispdf-table tbody');
             const multiplier = parseFloat(document.getElementById('dispdf-multiplier').value) || 1.84;
-            const country = document.getElementById('dispdf-country').value || 'Deutschland';
-            const manufacturer = document.getElementById('dispdf-manufacturer').value || '';
+            const countryDefault = document.getElementById('dispdf-country').value || 'Deutschland';
+            const manufacturerDefault = document.getElementById('dispdf-manufacturer').value || '';
             tbody.innerHTML = '';
 
             data.forEach((item, index) => {
-                const purchaseCost = (item.purchaseCost * item.duration).toFixed(2);
-                const unitPrice = (purchaseCost * multiplier).toFixed(2);
+                // Purchase Cost ist der Einzelpreis (fuer gesamte Laufzeit)
+                const purchaseCost = item.purchaseCost.toFixed(2);
+                const unitPrice = (item.purchaseCost * multiplier).toFixed(2);
                 const description = `S/N: ${item.serials.join(', ') || 'n.a.'}`;
+                // Verwende extrahierten Manufacturer wenn vorhanden, sonst Default
+                const itemManufacturer = item.manufacturer || manufacturerDefault;
+                const itemCountry = getCountryForLanguage(item.country || countryDefault, 'de');
 
                 const row = document.createElement('tr');
                 row.innerHTML = `
                     <td contenteditable="true">${item.productName}</td>
                     <td>1</td>
-                    <td><input type="text" value="${manufacturer}" class="dispdf-manufacturer-input" style="width:100%;"></td>
+                    <td><input type="text" value="${itemManufacturer}" class="dispdf-manufacturer-input" style="width:100%;"></td>
                     <td>Wartung</td>
-                    <td>DIS AG</td>
+                    <td>DIS Daten-IT-Service GmbH</td>
                     <td contenteditable="true">${unitPrice}</td>
                     <td>999</td>
                     <td>Team Wartung</td>
                     <td contenteditable="true" style="white-space:pre-wrap;">${description}</td>
                     <td contenteditable="true">${purchaseCost}</td>
                     <td><input type="text" value="${item.sla}" class="dispdf-sla-input" style="width:100%;"></td>
-                    <td><input type="text" value="${item.country || country}" class="dispdf-country-input" style="width:100%;"></td>
+                    <td><input type="text" value="${itemCountry}" class="dispdf-country-input" style="width:100%;"></td>
                     <td contenteditable="true">${item.duration}</td>
                     <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
                 `;
@@ -2638,22 +2827,47 @@
                     continue;
                 }
 
-                // SN block
+                // SN block - sammle alle Seriennummern
                 if (/^(?:SN:|S\/N:|Serial:|Seriennummer:)/i.test(line)) {
                     if (lastIdxProduct >= 0) {
                         const serials = [];
+                        // Erste Zeile: entferne Praefix und sammle Seriennummern
                         let first = line.replace(/^(?:SN:|S\/N:|Serial:|Seriennummer:)\s*/i, '').trim();
-                        if (first) serials.push(first);
+                        // Mehrere Seriennummern koennen komma- oder leerzeichengetrennt sein
+                        if (first) {
+                            const snParts = first.split(/[,;\s]+/).filter(s => s.length > 3 && /^[A-Za-z0-9_-]+$/.test(s));
+                            serials.push(...snParts.length > 0 ? snParts : [first]);
+                        }
 
+                        // Folgende Zeilen pruefen - erlaube Bindestriche, Unterstriche und andere SN-Zeichen
                         let k = idx + 1;
-                        while (k < lines.length && /^[A-Za-z0-9]+$/.test(lines[k])) {
-                            serials.push(lines[k].trim());
-                            k++;
+                        while (k < lines.length) {
+                            const nextLine = lines[k].trim();
+                            // Stopp bei neuer Produktzeile oder anderen Sektionen
+                            if (/^(?:\d+|A)\s+[\d,]+\s+(?:Stck\.|Monat)/i.test(nextLine)) break;
+                            if (/^(?:SN:|S\/N:|Serial:|Seriennummer:|für\s+|Reaktionszeit:|Laufzeit:)/i.test(nextLine)) break;
+                            if (/^\d+[.,]\d{2}\s*€?$/.test(nextLine)) break;
+                            if (nextLine.length === 0) break;
+
+                            // Seriennummer-Pattern: alphanumerisch mit Bindestrichen/Unterstrichen
+                            if (/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(nextLine) && nextLine.length >= 4) {
+                                serials.push(nextLine);
+                                k++;
+                            } else {
+                                break;
+                            }
                         }
 
                         const item = items[lastIdxProduct];
-                        item.seriennummerCount = serials.length;
-                        item.seriennummern = serials.join(', ');
+                        // Fuege zu existierenden Seriennummern hinzu (nicht ueberschreiben!)
+                        if (item.seriennummern && item.seriennummern !== '') {
+                            const existing = item.seriennummern.split(', ').filter(s => s && s !== 'n.a.');
+                            serials.push(...existing);
+                        }
+                        // Duplikate entfernen und speichern
+                        const uniqueSerials = [...new Set(serials)];
+                        item.seriennummerCount = uniqueSerials.length;
+                        item.seriennummern = uniqueSerials.join(', ');
                     }
                     continue;
                 }
@@ -2715,9 +2929,12 @@
             tbody.innerHTML = '';
 
             data.forEach((item, index) => {
+                // Purchase Cost ist der Einzelpreis
                 const purchaseCost = item.einzelpreis.toFixed(2);
                 const unitPrice = (item.einzelpreis * multiplier).toFixed(2);
-                const description = `S/N: ${item.seriennummern}\nService Start: ${item.serviceStart}\nService Ende: ${item.serviceEnde}`;
+                const description = `S/N: ${item.seriennummern || 'n.a.'}\nService Start: ${item.serviceStart}\nService Ende: ${item.serviceEnde}`;
+                // Laender normalisieren
+                const itemCountry = getCountryForLanguage(item.country || countryInput, 'de');
 
                 const row = document.createElement('tr');
                 row.innerHTML = `
@@ -2732,7 +2949,7 @@
                     <td contenteditable="true" style="white-space:pre-wrap;">${description}</td>
                     <td contenteditable="true">${purchaseCost}</td>
                     <td><input type="text" value="${item.sla}" class="idspdf-sla-input" style="width:100%;"></td>
-                    <td><input type="text" value="${item.country || countryInput}" class="idspdf-country-input" style="width:100%;"></td>
+                    <td><input type="text" value="${itemCountry}" class="idspdf-country-input" style="width:100%;"></td>
                     <td contenteditable="true">${item.durationInMonths}</td>
                     <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
                 `;
