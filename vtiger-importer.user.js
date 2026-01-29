@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.7.0
+// @version      1.8.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -2392,172 +2392,207 @@
 
         function parseDisPdf(rawText) {
             const items = [];
-            const lines = rawText.split('\n').map(l => l.trim());
+            const lines = rawText.split('\n').map(l => l.trim()).filter(l => l);
 
-            // Extract Laufzeit
-            let globalDuration = 12;
-            const durationMatch = rawText.match(/(?:\*{3}\s*)?Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)/i);
-            if (durationMatch) {
-                globalDuration = parseInt(durationMatch[1], 10);
-            }
-
-            // Extract SLA - Format: "Servicezeiten: (5x9)" und "Reaktionszeit vor Ort: NBD"
-            let globalSla = 'tba';
-            // Suche nach Servicezeiten mit Klammer-Format (5x9) oder (7x24)
-            const serviceZeitenMatch = rawText.match(/Servicezeiten:[^\n]*\((\d+x\d+)\)/i);
-            // Suche nach Reaktionszeit vor Ort
-            const reaktionszeitMatch = rawText.match(/Reaktionszeit\s*(?:vor\s*Ort)?:\s*([^\n(]+)/i);
-
-            if (serviceZeitenMatch || reaktionszeitMatch) {
-                let zeitFenster = '';
-                let reaktion = '';
-
-                if (serviceZeitenMatch) {
-                    zeitFenster = serviceZeitenMatch[1].trim().toLowerCase();
+            // Helper: Parse German price format (170,30 or 1.234,56)
+            const parseGermanPrice = (str) => {
+                if (!str) return 0;
+                let clean = str.replace(/[€EUR\s]/g, '').trim();
+                if (clean.includes(',')) {
+                    clean = clean.replace(/\./g, '').replace(',', '.');
                 }
-                if (reaktionszeitMatch) {
-                    reaktion = reaktionszeitMatch[1].trim().toLowerCase();
-                }
+                return parseFloat(clean) || 0;
+            };
 
-                // Mapping zu Standard-SLA-Format
-                if (zeitFenster.includes('7x24') || zeitFenster.includes('24x7')) {
-                    if (reaktion.includes('4h') || reaktion.includes('4 h') || reaktion === '4') globalSla = '7x24x4';
-                    else if (reaktion.includes('nbd') || reaktion.includes('next')) globalSla = '7x24xNBD';
-                    else globalSla = '7x24xNBD';
-                } else if (zeitFenster.includes('5x9') || zeitFenster.includes('9x5')) {
-                    if (reaktion.includes('4h') || reaktion.includes('4 h') || reaktion === '4') globalSla = '5x9x4';
-                    else if (reaktion.includes('nbd') || reaktion.includes('next')) globalSla = '5x9xNBD';
-                    else globalSla = '5x9xNBD';
-                } else if (reaktion) {
-                    // Nur Reaktionszeit ohne Servicezeiten
-                    if (reaktion.includes('nbd')) globalSla = '5x9xNBD';
-                    else if (reaktion.includes('4h') || reaktion.includes('4 h')) globalSla = '5x9x4';
-                }
-            }
-
-            // Extract Service Start und Ende
+            // Extract Laufzeit - Format: "*** Laufzeit: 01.04.2023 - 30.04.2024 ***"
             let serviceStart = 'tba';
             let serviceEnde = 'tba';
-            const startMatch = rawText.match(/(?:Service\s*Start|Beginn|Vertragsbeginn|Start):\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/i);
-            const endeMatch = rawText.match(/(?:Service\s*Ende|Ende|Vertragsende|End):\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/i);
-            if (startMatch) serviceStart = startMatch[1];
-            if (endeMatch) serviceEnde = endeMatch[1];
+            let globalDuration = 12;
 
-            // Extract country/location
-            let country = 'Deutschland';
-            const locationMatch = rawText.match(/(?:Standort|Location|Endkunde|Land):\s*([^\n]+)/i);
-            if (locationMatch) {
-                country = normalizeCountry(locationMatch[1].trim());
-            }
-
-            // DIS PDF Format:
-            // Zeile mit Artikel Nr. enthaelt: [Artikel Nr.] ... [Menge] [ME] [Einzelpreis] [Gesamtpreis]
-            // Naechste Zeile(n): Bezeichnung mit Manufacturer und Product Name
-            // Danach: S/N: mit Seriennummern
-
-            // Suche nach Header-Zeile mit "Artikel Nr." oder "Bezeichnung"
-            let headerIndex = -1;
-            for (let i = 0; i < lines.length; i++) {
-                if (/Artikel\s*Nr\.?.*Bezeichnung.*Menge.*Einzelpreis.*Gesamtpreis/i.test(lines[i]) ||
-                    /Artikel.*Nr\.?.*Menge.*ME.*Einzelpreis/i.test(lines[i])) {
-                    headerIndex = i;
-                    break;
+            const laufzeitMatch = rawText.match(/\*{3}\s*Laufzeit:\s*(\d{1,2}\.\d{1,2}\.\d{4})\s*-\s*(\d{1,2}\.\d{1,2}\.\d{4})\s*\*{3}/i);
+            if (laufzeitMatch) {
+                serviceStart = laufzeitMatch[1];
+                serviceEnde = laufzeitMatch[2];
+                // Berechne Dauer in Monaten
+                const [d1, m1, y1] = serviceStart.split('.').map(Number);
+                const [d2, m2, y2] = serviceEnde.split('.').map(Number);
+                globalDuration = (y2 - y1) * 12 + (m2 - m1) + (d2 >= d1 ? 1 : 0);
+                if (globalDuration <= 0) globalDuration = 12;
+            } else {
+                // Fallback: "Laufzeit: X Monate"
+                const durationMatch = rawText.match(/Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)/i);
+                if (durationMatch) {
+                    globalDuration = parseInt(durationMatch[1], 10);
                 }
             }
 
-            // Parse Produkt-Bloecke
+            // Extract SLA - Format: "Servicezeiten: Mo.- Fr. 08.00-17.00 Uhr (5x9)" + "Reaktionszeit vor Ort: NBD"
+            let globalSla = 'tba';
+            const serviceZeitenMatch = rawText.match(/Servicezeiten:[^\n]*\((\d+x\d+)\)/i);
+            const reaktionszeitMatch = rawText.match(/Reaktionszeit\s*(?:vor\s*Ort)?:\s*(\w+)/i);
+
+            if (serviceZeitenMatch || reaktionszeitMatch) {
+                let zeitFenster = serviceZeitenMatch ? serviceZeitenMatch[1].toLowerCase() : '';
+                let reaktion = reaktionszeitMatch ? reaktionszeitMatch[1].toLowerCase() : '';
+
+                if (zeitFenster.includes('7x24') || zeitFenster.includes('24x7')) {
+                    if (reaktion.includes('4h') || reaktion === '4') globalSla = '7x24x4';
+                    else globalSla = '7x24xNBD';
+                } else if (zeitFenster.includes('5x9') || zeitFenster.includes('9x5')) {
+                    if (reaktion.includes('4h') || reaktion === '4') globalSla = '5x9x4';
+                    else globalSla = '5x9xNBD';
+                } else if (reaktion) {
+                    if (reaktion.includes('nbd')) globalSla = '5x9xNBD';
+                    else if (reaktion.includes('4h')) globalSla = '5x9x4';
+                }
+            }
+
+            // Extract Country - "AT 1200 Wien" oder "DE 85326 München" oder Lieferadresse
+            let country = 'Deutschland';
+            const countryCodeMatch = rawText.match(/\b(AT|DE|CH)\s+\d{4,5}\s+\w+/i);
+            if (countryCodeMatch) {
+                const code = countryCodeMatch[1].toUpperCase();
+                if (code === 'AT') country = 'Österreich';
+                else if (code === 'CH') country = 'Schweiz';
+                else country = 'Deutschland';
+            }
+            // Lieferadresse hat Vorrang
+            const lieferMatch = rawText.match(/Lieferadresse[:\s]+[^\n]*\n[^\n]*(AT|DE|CH)\s+\d{4,5}/i);
+            if (lieferMatch) {
+                const code = lieferMatch[1].toUpperCase();
+                if (code === 'AT') country = 'Österreich';
+                else if (code === 'CH') country = 'Schweiz';
+                else country = 'Deutschland';
+            }
+
+            // Known manufacturers for extraction
+            const knownManufacturers = ['HP', 'HPE', 'Hewlett Packard', 'Dell', 'Cisco', 'IBM', 'Lenovo',
+                'Fujitsu', 'NetApp', 'EMC', 'VMware', 'Microsoft', 'Oracle', 'Juniper', 'Arista',
+                'Fortinet', 'Palo Alto', 'CheckPoint', 'F5', 'Citrix', 'Nutanix', 'Pure Storage',
+                'Hitachi', 'Huawei', 'Supermicro', 'QNAP', 'Synology', 'APC', 'Eaton', 'Vertiv', 'Brocade'];
+
+            // DIS PDF Format:
+            // Zeile: "WL HW-Wartungsgebühr / gesamte Laufzeit 4,00 Stk 170,30 EUR 681,20 €"
+            // Nächste Zeile: "Fujitsu Primergy RX2530 M2" (Produktname)
+            // Danach: "S/N: YM6B004577, YM6B004578, YM6B004579, YM6B004580"
+
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
 
-                // Erkenne Zeile mit Artikel-Nr und Preisen
-                // Format kann sein: "123456 1 Stk 100,00 100,00" oder aehnlich
-                // Oder Preise am Ende der Zeile
-                const pricePattern = /(\d+[.,]\d{2})\s+(\d+[.,]\d{2})\s*€?\s*$/;
-                const priceMatch = line.match(pricePattern);
+                // Erkenne HW-Wartungsgebühr Zeile mit Preisen
+                // Format: "WL HW-Wartungsgebühr / gesamte Laufzeit 4,00 Stk 170,30 EUR 681,20 €"
+                const wartungMatch = line.match(/(?:HW-Wartung|Wartung|Maintenance).*?(\d+[.,]\d{2})\s*(?:Stk?|St|PC)?\s*(\d+[.,]\d{2})\s*EUR\s+(\d+[.,]\d{2})\s*€/i);
 
-                if (priceMatch) {
-                    // Parse Preise (deutsches Format: 1.234,56 oder 1234,56)
-                    const parseGermanPrice = (str) => {
-                        let clean = str.replace(/[€\s]/g, '').trim();
-                        // Wenn Komma nach dem letzten Punkt -> deutsches Format
-                        if (clean.includes(',')) {
-                            clean = clean.replace(/\./g, '').replace(',', '.');
-                        }
-                        return parseFloat(clean) || 0;
-                    };
+                if (wartungMatch) {
+                    const menge = Math.round(parseGermanPrice(wartungMatch[1])) || 1;
+                    const einzelpreis = parseGermanPrice(wartungMatch[2]);
 
-                    const einzelpreis = parseGermanPrice(priceMatch[1]);
-                    const gesamtpreis = parseGermanPrice(priceMatch[2]);
-
-                    // Menge aus der Zeile extrahieren
-                    const mengeMatch = line.match(/(\d+)\s+(?:St(?:ck?|ück)?|Stk|ME|PC)\s/i);
-                    const menge = mengeMatch ? parseInt(mengeMatch[1], 10) : 1;
-
-                    // Suche Bezeichnung in den naechsten Zeilen
+                    // Suche Produktname und SNs in den nächsten Zeilen
                     let productName = '';
                     let manufacturer = '';
                     let serials = [];
-                    let foundDescription = false;
 
-                    for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
-                        const nextLine = lines[j].trim();
-                        if (!nextLine) continue;
+                    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+                        const nextLine = lines[j];
 
-                        // Neue Artikel-Zeile mit Preisen? -> Stop
-                        if (pricePattern.test(nextLine)) break;
+                        // Neue Wartungszeile? -> Stop
+                        if (/HW-Wartung|Wartung|Maintenance/i.test(nextLine) && /\d+[.,]\d{2}\s*€/.test(nextLine)) break;
+                        // Summe-Zeile? -> Stop
+                        if (/^(Summe|Gesamt|Zwischen|Netto|Übertrag)/i.test(nextLine)) break;
 
-                        // Seriennummern-Zeile
-                        const snMatch = nextLine.match(/^(?:S\/N|SN|Seriennummer)[:\s]+(.+)/i);
+                        // S/N Zeile: "S/N: YM6B004577, YM6B004578, ..."
+                        const snMatch = nextLine.match(/^S\/N[:\s]+(.+)/i);
                         if (snMatch) {
-                            // Sammle alle SNs - auch aus Folgezeilen
-                            let snText = snMatch[1].trim();
-                            serials.push(...snText.split(/[,;\s]+/).filter(s => s.length >= 4 && /^[A-Za-z0-9_-]+$/.test(s)));
-
-                            // Pruefe folgende Zeilen auf weitere SNs
-                            for (let k = j + 1; k < Math.min(j + 5, lines.length); k++) {
-                                const snLine = lines[k].trim();
-                                if (!snLine || pricePattern.test(snLine)) break;
-                                if (/^(?:S\/N|SN|Seriennummer)[:\s]/i.test(snLine)) break;
-                                // Wenn Zeile wie eine SN aussieht (alphanumerisch, min 4 Zeichen)
-                                if (/^[A-Za-z0-9][A-Za-z0-9_-]{3,}$/.test(snLine)) {
-                                    serials.push(snLine);
-                                } else {
-                                    break;
-                                }
-                            }
+                            const snText = snMatch[1].trim();
+                            serials = snText.split(/[,;\s]+/).filter(s => s.length >= 4 && /^[A-Za-z0-9_-]+$/.test(s));
                             continue;
                         }
 
-                        // Bezeichnungszeile (Manufacturer + Product Name)
-                        if (!foundDescription && nextLine.length > 3) {
-                            // Ignoriere Header und Summen-Zeilen
-                            if (/^(Pos|Artikel|Menge|ME|Summe|Gesamt|Zwischen|Netto|Brutto|\d+[.,]\d{2})/i.test(nextLine)) continue;
+                        // Produktname-Zeile (z.B. "Fujitsu Primergy RX2530 M2")
+                        if (!productName && nextLine.length > 3) {
+                            // Ignoriere irrelevante Zeilen
+                            if (/^(\*{3}|inkl\.|HDD|Artikel|Pos|Menge|ME|EUR|€|\d+[.,]\d{2})/i.test(nextLine)) continue;
 
-                            foundDescription = true;
-                            // Versuche Manufacturer vom Product Name zu trennen
-                            // Typische Formate: "HP ProLiant DL380", "Dell PowerEdge R740", "Cisco Catalyst 9300"
-                            const knownManufacturers = ['HP', 'HPE', 'Hewlett Packard', 'Dell', 'Cisco', 'IBM', 'Lenovo', 'Fujitsu', 'NetApp', 'EMC', 'VMware', 'Microsoft', 'Oracle', 'Juniper', 'Arista', 'Fortinet', 'Palo Alto', 'CheckPoint', 'F5', 'Citrix', 'Nutanix', 'Pure Storage', 'Hitachi', 'Huawei', 'Supermicro', 'QNAP', 'Synology', 'APC', 'Eaton', 'Vertiv'];
-
+                            // Finde Manufacturer
                             let foundMfr = false;
                             for (const mfr of knownManufacturers) {
-                                if (nextLine.toLowerCase().startsWith(mfr.toLowerCase())) {
+                                if (nextLine.toLowerCase().startsWith(mfr.toLowerCase() + ' ') ||
+                                    nextLine.toLowerCase() === mfr.toLowerCase()) {
                                     manufacturer = mfr;
-                                    productName = nextLine.substring(mfr.length).trim();
-                                    // Entferne fuehrende Bindestriche oder Doppelpunkte
-                                    productName = productName.replace(/^[-:]\s*/, '');
+                                    productName = nextLine.substring(mfr.length).trim() || nextLine;
                                     foundMfr = true;
                                     break;
                                 }
                             }
 
                             if (!foundMfr) {
-                                // Versuche am ersten Wort zu trennen wenn es gross geschrieben ist
+                                productName = nextLine;
+                                // Versuche ersten Begriff als Hersteller
                                 const words = nextLine.split(/\s+/);
-                                if (words.length >= 2 && /^[A-Z]{2,}$/.test(words[0])) {
+                                if (words.length >= 2) {
                                     manufacturer = words[0];
                                     productName = words.slice(1).join(' ');
-                                } else {
-                                    productName = nextLine;
+                                }
+                            }
+                        }
+                    }
+
+                    if (productName || serials.length > 0) {
+                        items.push({
+                            productName: productName || 'N/A',
+                            manufacturer,
+                            serials: serials.length > 0 ? serials : ['tba'],
+                            sla: globalSla,
+                            country,
+                            duration: globalDuration,
+                            purchaseCost: einzelpreis,
+                            serviceStart,
+                            serviceEnde,
+                            menge
+                        });
+                    }
+                    continue;
+                }
+
+                // Alternative: Zeile mit EUR und € Preis am Ende (z.B. "... 170,30 EUR 681,20 €")
+                const altPriceMatch = line.match(/(\d+[.,]\d{2})\s*EUR\s+(\d+[.,]\d{2})\s*€\s*$/);
+                if (altPriceMatch && !items.some(it => it.purchaseCost === parseGermanPrice(altPriceMatch[1]))) {
+                    const einzelpreis = parseGermanPrice(altPriceMatch[1]);
+
+                    // Menge aus Zeile
+                    const mengeMatch = line.match(/(\d+[.,]\d{2})\s*(?:Stk?|St|PC)/i);
+                    const menge = mengeMatch ? Math.round(parseGermanPrice(mengeMatch[1])) : 1;
+
+                    // Suche Produktname und SNs
+                    let productName = '';
+                    let manufacturer = '';
+                    let serials = [];
+
+                    for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
+                        const nextLine = lines[j];
+                        if (/^(Summe|Gesamt|Zwischen|Netto|Übertrag)/i.test(nextLine)) break;
+                        if (/\d+[.,]\d{2}\s*EUR\s+\d+[.,]\d{2}\s*€/.test(nextLine)) break;
+
+                        const snMatch = nextLine.match(/^S\/N[:\s]+(.+)/i);
+                        if (snMatch) {
+                            serials = snMatch[1].split(/[,;\s]+/).filter(s => s.length >= 4 && /^[A-Za-z0-9_-]+$/.test(s));
+                            continue;
+                        }
+
+                        if (!productName && nextLine.length > 3 && !/^(\*{3}|inkl\.|HDD|Artikel|Pos)/i.test(nextLine)) {
+                            for (const mfr of knownManufacturers) {
+                                if (nextLine.toLowerCase().startsWith(mfr.toLowerCase() + ' ')) {
+                                    manufacturer = mfr;
+                                    productName = nextLine.substring(mfr.length).trim();
+                                    break;
+                                }
+                            }
+                            if (!productName) {
+                                productName = nextLine;
+                                const words = nextLine.split(/\s+/);
+                                if (words.length >= 2) {
+                                    manufacturer = words[0];
+                                    productName = words.slice(1).join(' ');
                                 }
                             }
                         }
@@ -2580,49 +2615,40 @@
                 }
             }
 
-            // Fallback: S/N-basiertes Parsing wenn keine strukturierten Daten gefunden
+            // Fallback: S/N-basiertes Parsing
             if (items.length === 0) {
-                // Suche alle S/N: Eintraege
-                const snRegex = /(?:S\/N|SN|Seriennummer)[:\s]+([A-Za-z0-9][A-Za-z0-9_-]*)/gi;
-                const allSerials = [];
+                const snRegex = /S\/N[:\s]+([A-Za-z0-9][A-Za-z0-9_,-\s]*)/gi;
+                let allSerials = [];
                 let match;
                 while ((match = snRegex.exec(rawText)) !== null) {
-                    if (match[1].length >= 4) {
-                        allSerials.push(match[1]);
-                    }
+                    const sns = match[1].split(/[,;\s]+/).filter(s => s.length >= 4 && /^[A-Za-z0-9_-]+$/.test(s));
+                    allSerials.push(...sns);
                 }
 
-                // Suche nach Produktbezeichnungen
-                const productPatterns = [
-                    /(?:ProLiant|PowerEdge|Catalyst|UCS|FlashArray|VNX|Unity)[^\n]+/gi,
-                    /(?:Server|Switch|Storage|Firewall|Router)[^\n]+/gi
-                ];
-
+                // Suche Produktname mit bekanntem Hersteller
                 let productName = 'N/A';
-                for (const pattern of productPatterns) {
-                    const pMatch = rawText.match(pattern);
+                let manufacturer = '';
+                for (const mfr of knownManufacturers) {
+                    const regex = new RegExp(mfr + '\\s+([^\\n]+)', 'i');
+                    const pMatch = rawText.match(regex);
                     if (pMatch) {
-                        productName = pMatch[0].trim();
+                        manufacturer = mfr;
+                        productName = pMatch[1].trim();
                         break;
                     }
                 }
 
-                // Suche nach Preis
+                // Suche Einzelpreis
                 let price = 0;
-                const priceMatches = rawText.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€/g);
-                if (priceMatches && priceMatches.length > 0) {
-                    const firstPrice = priceMatches[0];
-                    let clean = firstPrice.replace(/[€\s]/g, '').trim();
-                    if (clean.includes(',')) {
-                        clean = clean.replace(/\./g, '').replace(',', '.');
-                    }
-                    price = parseFloat(clean) || 0;
+                const priceMatch = rawText.match(/(\d+[.,]\d{2})\s*EUR/);
+                if (priceMatch) {
+                    price = parseGermanPrice(priceMatch[1]);
                 }
 
                 if (allSerials.length > 0 || productName !== 'N/A') {
                     items.push({
                         productName,
-                        manufacturer: '',
+                        manufacturer,
                         serials: allSerials.length > 0 ? allSerials : ['tba'],
                         sla: globalSla,
                         country,
