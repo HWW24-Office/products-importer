@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.6.0
+// @version      1.7.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -348,7 +348,7 @@
     // ============================================
     const countryMapping = {
         "DE": "Deutschland",
-        "AT": "Oesterreich",
+        "AT": "Österreich",
         "CH": "Schweiz"
     };
 
@@ -365,7 +365,7 @@
         'united arab emirates': 'UAE', 'vereinigte arabische emirate': 'UAE', 'vae': 'UAE', 'v.a.e.': 'UAE',
         // Deutschland-Varianten
         'germany': 'Germany', 'deutschland': 'Germany', 'de': 'Germany', 'ger': 'Germany',
-        // Oesterreich-Varianten
+        // Österreich-Varianten
         'austria': 'Austria', 'oesterreich': 'Austria', 'österreich': 'Austria', 'at': 'Austria', 'aut': 'Austria',
         // Schweiz-Varianten
         'switzerland': 'Switzerland', 'schweiz': 'Switzerland', 'suisse': 'Switzerland', 'svizzera': 'Switzerland', 'ch': 'Switzerland',
@@ -391,7 +391,7 @@
         'UK': { en: 'UK', de: 'UK' },
         'UAE': { en: 'UAE', de: 'UAE' },
         'Germany': { en: 'Germany', de: 'Deutschland' },
-        'Austria': { en: 'Austria', de: 'Oesterreich' },
+        'Austria': { en: 'Austria', de: 'Österreich' },
         'Switzerland': { en: 'Switzerland', de: 'Schweiz' },
         'France': { en: 'France', de: 'Frankreich' },
         'Netherlands': { en: 'Netherlands', de: 'Niederlande' },
@@ -696,7 +696,7 @@
                         <label>Land:</label>
                         <select id="axians-country">
                             <option value="DE">Deutschland</option>
-                            <option value="AT">Oesterreich</option>
+                            <option value="AT">Österreich</option>
                             <option value="CH">Schweiz</option>
                         </select>
                     </div>
@@ -987,7 +987,7 @@
                         <label>Land:</label>
                         <select id="tg-country">
                             <option value="DE">Deutschland</option>
-                            <option value="AT">Oesterreich</option>
+                            <option value="AT">Österreich</option>
                             <option value="CH">Schweiz</option>
                         </select>
                     </div>
@@ -1243,7 +1243,6 @@
                     <label>Manufacturer:</label>
                     <input type="text" id="tgpdf-manufacturer" placeholder="Hersteller">
                     <button id="tgpdf-apply-manufacturer">Anwenden</button>
-                    <button id="tgpdf-search-manufacturer" style="margin-top:5px;">Manufacturer suchen</button>
                 </div>
                 <div class="imp-form-group">
                     <label>Land:</label>
@@ -1280,9 +1279,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="imp-form-group" style="margin-top:10px;">
+            <div class="imp-form-group" style="margin-top:10px; display:flex; gap:10px;">
                 <button id="tgpdf-download">CSV speichern</button>
-                <button id="tgpdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+                <button id="tgpdf-lang-toggle">Sprache: DE → EN</button>
             </div>
         `;
 
@@ -1448,7 +1447,10 @@
                 row.innerHTML = `
                     <td contenteditable="true">${item.artikelnummer}</td>
                     <td>1</td>
-                    <td><input type="text" value="${manufacturer}" class="tgpdf-manufacturer-input" style="width:100%;"></td>
+                    <td>
+                        <input type="text" value="${manufacturer}" class="tgpdf-manufacturer-input" style="width:calc(100% - 25px);">
+                        <button class="tgpdf-search-btn" title="Manufacturer suchen" style="width:22px;padding:2px;">🔍</button>
+                    </td>
                     <td>Wartung</td>
                     <td>Technogroup IT-Service GmbH</td>
                     <td contenteditable="true">${unitPrice}</td>
@@ -1463,33 +1465,23 @@
                 `;
                 tbody.appendChild(row);
             });
+
+            // Event-Handler fuer Such-Buttons
+            tbody.querySelectorAll('.tgpdf-search-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const row = e.target.closest('tr');
+                    const productName = row.cells[0].textContent.trim();
+                    if (productName && productName !== 'N/A') {
+                        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(productName + ' manufacturer')}`;
+                        window.open(searchUrl, '_blank');
+                    }
+                });
+            });
         }
 
         document.getElementById('tgpdf-apply-manufacturer').addEventListener('click', () => {
             const val = document.getElementById('tgpdf-manufacturer').value;
             document.querySelectorAll('.tgpdf-manufacturer-input').forEach(i => i.value = val);
-        });
-        document.getElementById('tgpdf-search-manufacturer').addEventListener('click', () => {
-            // Sammle alle Product Names aus der Tabelle
-            const productNames = [];
-            document.querySelectorAll('#tgpdf-table tbody tr').forEach(row => {
-                const productName = row.cells[0].textContent.trim();
-                if (productName && productName !== 'N/A') {
-                    productNames.push(productName);
-                }
-            });
-
-            if (productNames.length === 0) {
-                alert('Keine Produkte in der Tabelle. Bitte zuerst ein PDF laden.');
-                return;
-            }
-
-            // Nehme den ersten Produktnamen fuer die Suche
-            const searchTerm = productNames[0];
-            // Erstelle Google-Suche URL
-            const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(searchTerm + ' manufacturer')}`;
-            // Oeffne in neuem Tab
-            window.open(searchUrl, '_blank');
         });
         document.getElementById('tgpdf-apply-country').addEventListener('click', () => {
             const val = document.getElementById('tgpdf-country').value;
@@ -1579,9 +1571,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="imp-form-group" style="margin-top:10px;">
+            <div class="imp-form-group" style="margin-top:10px; display:flex; gap:10px;">
                 <button id="pp-download">CSV herunterladen</button>
-                <button id="pp-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+                <button id="pp-lang-toggle">Sprache: DE → EN</button>
             </div>
         `;
 
@@ -1850,9 +1842,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="imp-form-group" style="margin-top:10px;">
+            <div class="imp-form-group" style="margin-top:10px; display:flex; gap:10px;">
                 <button id="pppdf-download">CSV herunterladen</button>
-                <button id="pppdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+                <button id="pppdf-lang-toggle">Sprache: DE → EN</button>
             </div>
         `;
 
@@ -2350,9 +2342,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="imp-form-group" style="margin-top:10px;">
+            <div class="imp-form-group" style="margin-top:10px; display:flex; gap:10px;">
                 <button id="dispdf-download">CSV speichern</button>
-                <button id="dispdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+                <button id="dispdf-lang-toggle">Sprache: DE → EN</button>
             </div>
         `;
 
@@ -2402,183 +2394,245 @@
             const items = [];
             const lines = rawText.split('\n').map(l => l.trim());
 
-            // Extract Laufzeit from *** Laufzeit: ... *** or similar patterns
+            // Extract Laufzeit
             let globalDuration = 12;
-            const durationMatch = rawText.match(/(?:\*{3}\s*)?Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)(?:\s*\*{3})?/i);
+            const durationMatch = rawText.match(/(?:\*{3}\s*)?Laufzeit:\s*(\d+)\s*(?:Monate?|Monat)/i);
             if (durationMatch) {
                 globalDuration = parseInt(durationMatch[1], 10);
             }
 
-            // Extract SLA from Servicezeiten and Reaktionszeit
-            let globalSla = 'N/A';
-            const serviceZeitenMatch = rawText.match(/Servicezeiten:\s*([^\n]+)/i);
-            const reaktionszeitMatch = rawText.match(/Reaktionszeit:\s*([^\n]+)/i);
+            // Extract SLA - Format: "Servicezeiten: (5x9)" und "Reaktionszeit vor Ort: NBD"
+            let globalSla = 'tba';
+            // Suche nach Servicezeiten mit Klammer-Format (5x9) oder (7x24)
+            const serviceZeitenMatch = rawText.match(/Servicezeiten:[^\n]*\((\d+x\d+)\)/i);
+            // Suche nach Reaktionszeit vor Ort
+            const reaktionszeitMatch = rawText.match(/Reaktionszeit\s*(?:vor\s*Ort)?:\s*([^\n(]+)/i);
 
-            if (serviceZeitenMatch && reaktionszeitMatch) {
-                const servicezeit = serviceZeitenMatch[1].trim().toLowerCase();
-                const reaktion = reaktionszeitMatch[1].trim().toLowerCase();
+            if (serviceZeitenMatch || reaktionszeitMatch) {
+                let zeitFenster = '';
+                let reaktion = '';
 
-                if (servicezeit.includes('24x7') || servicezeit.includes('24/7')) {
-                    if (reaktion.includes('4') || reaktion.includes('vier')) globalSla = '7x24x4';
-                    else if (reaktion.includes('nbd') || reaktion.includes('next business')) globalSla = '7x24xNBD';
-                } else if (servicezeit.includes('5x9') || servicezeit.includes('10x5') || servicezeit.includes('mo-fr')) {
-                    if (reaktion.includes('4') || reaktion.includes('vier')) globalSla = '5x9x4';
-                    else if (reaktion.includes('nbd') || reaktion.includes('next business')) globalSla = '5x9xNBD';
+                if (serviceZeitenMatch) {
+                    zeitFenster = serviceZeitenMatch[1].trim().toLowerCase();
+                }
+                if (reaktionszeitMatch) {
+                    reaktion = reaktionszeitMatch[1].trim().toLowerCase();
+                }
+
+                // Mapping zu Standard-SLA-Format
+                if (zeitFenster.includes('7x24') || zeitFenster.includes('24x7')) {
+                    if (reaktion.includes('4h') || reaktion.includes('4 h') || reaktion === '4') globalSla = '7x24x4';
+                    else if (reaktion.includes('nbd') || reaktion.includes('next')) globalSla = '7x24xNBD';
+                    else globalSla = '7x24xNBD';
+                } else if (zeitFenster.includes('5x9') || zeitFenster.includes('9x5')) {
+                    if (reaktion.includes('4h') || reaktion.includes('4 h') || reaktion === '4') globalSla = '5x9x4';
+                    else if (reaktion.includes('nbd') || reaktion.includes('next')) globalSla = '5x9xNBD';
+                    else globalSla = '5x9xNBD';
+                } else if (reaktion) {
+                    // Nur Reaktionszeit ohne Servicezeiten
+                    if (reaktion.includes('nbd')) globalSla = '5x9xNBD';
+                    else if (reaktion.includes('4h') || reaktion.includes('4 h')) globalSla = '5x9x4';
                 }
             }
 
+            // Extract Service Start und Ende
+            let serviceStart = 'tba';
+            let serviceEnde = 'tba';
+            const startMatch = rawText.match(/(?:Service\s*Start|Beginn|Vertragsbeginn|Start):\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/i);
+            const endeMatch = rawText.match(/(?:Service\s*Ende|Ende|Vertragsende|End):\s*(\d{1,2}[./-]\d{1,2}[./-]\d{2,4})/i);
+            if (startMatch) serviceStart = startMatch[1];
+            if (endeMatch) serviceEnde = endeMatch[1];
+
             // Extract country/location
             let country = 'Deutschland';
-            const locationMatch = rawText.match(/(?:Standort|Location|Endkunde):\s*([^\n]+)/i);
+            const locationMatch = rawText.match(/(?:Standort|Location|Endkunde|Land):\s*([^\n]+)/i);
             if (locationMatch) {
                 country = normalizeCountry(locationMatch[1].trim());
             }
 
             // DIS PDF Format:
-            // - Zeile mit "Artikel Nr." enthaelt Menge, Einzelpreis, Gesamtpreis
-            // - Zeile darunter: Manufacturer und Product Name unter "Bezeichnung"
-            // - 1-2 Zeilen darunter: Seriennummern (S/N:)
+            // Zeile mit Artikel Nr. enthaelt: [Artikel Nr.] ... [Menge] [ME] [Einzelpreis] [Gesamtpreis]
+            // Naechste Zeile(n): Bezeichnung mit Manufacturer und Product Name
+            // Danach: S/N: mit Seriennummern
 
-            // Suche nach Artikelzeilen (beginnt oft mit Artikelnummer-Pattern)
+            // Suche nach Header-Zeile mit "Artikel Nr." oder "Bezeichnung"
+            let headerIndex = -1;
+            for (let i = 0; i < lines.length; i++) {
+                if (/Artikel\s*Nr\.?.*Bezeichnung.*Menge.*Einzelpreis.*Gesamtpreis/i.test(lines[i]) ||
+                    /Artikel.*Nr\.?.*Menge.*ME.*Einzelpreis/i.test(lines[i])) {
+                    headerIndex = i;
+                    break;
+                }
+            }
+
+            // Parse Produkt-Bloecke
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i];
 
-                // Erkenne Artikelzeile: enthaelt typischerweise Menge und Preise
-                // Format: [Artikel Nr.] [Menge] [ME] [Einzelpreis] [Gesamtpreis]
-                // Oder: Zeile enthaelt numerische Werte fuer Preise
-                const artikelMatch = line.match(/^(\d{4,}|\d+-\d+)\s+.*?(\d+)\s+(?:St(?:ck?|ück)?|ME|PC)?\s*(\d+[.,]\d{2})\s*€?\s*(\d+[.,]\d{2})\s*€?$/i);
+                // Erkenne Zeile mit Artikel-Nr und Preisen
+                // Format kann sein: "123456 1 Stk 100,00 100,00" oder aehnlich
+                // Oder Preise am Ende der Zeile
+                const pricePattern = /(\d+[.,]\d{2})\s+(\d+[.,]\d{2})\s*€?\s*$/;
+                const priceMatch = line.match(pricePattern);
 
-                if (artikelMatch) {
-                    const menge = parseInt(artikelMatch[2], 10) || 1;
-                    let einzelpreis = artikelMatch[3].replace('.', '').replace(',', '.');
-                    let gesamtpreis = artikelMatch[4].replace('.', '').replace(',', '.');
+                if (priceMatch) {
+                    // Parse Preise (deutsches Format: 1.234,56 oder 1234,56)
+                    const parseGermanPrice = (str) => {
+                        let clean = str.replace(/[€\s]/g, '').trim();
+                        // Wenn Komma nach dem letzten Punkt -> deutsches Format
+                        if (clean.includes(',')) {
+                            clean = clean.replace(/\./g, '').replace(',', '.');
+                        }
+                        return parseFloat(clean) || 0;
+                    };
 
-                    einzelpreis = parseFloat(einzelpreis) || 0;
-                    gesamtpreis = parseFloat(gesamtpreis) || 0;
+                    const einzelpreis = parseGermanPrice(priceMatch[1]);
+                    const gesamtpreis = parseGermanPrice(priceMatch[2]);
 
-                    // Naechste Zeile(n) fuer Bezeichnung (Manufacturer + Product Name)
-                    let productName = 'N/A';
+                    // Menge aus der Zeile extrahieren
+                    const mengeMatch = line.match(/(\d+)\s+(?:St(?:ck?|ück)?|Stk|ME|PC)\s/i);
+                    const menge = mengeMatch ? parseInt(mengeMatch[1], 10) : 1;
+
+                    // Suche Bezeichnung in den naechsten Zeilen
+                    let productName = '';
                     let manufacturer = '';
                     let serials = [];
+                    let foundDescription = false;
 
-                    // Suche in den naechsten Zeilen nach Bezeichnung und S/N
-                    for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
-                        const nextLine = lines[j];
+                    for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
+                        const nextLine = lines[j].trim();
+                        if (!nextLine) continue;
 
-                        // Seriennummer gefunden?
-                        const snMatch = nextLine.match(/(?:S\/N:|SN:|Seriennummer:)\s*(.+)/i);
+                        // Neue Artikel-Zeile mit Preisen? -> Stop
+                        if (pricePattern.test(nextLine)) break;
+
+                        // Seriennummern-Zeile
+                        const snMatch = nextLine.match(/^(?:S\/N|SN|Seriennummer)[:\s]+(.+)/i);
                         if (snMatch) {
-                            // Sammle alle Seriennummern (komma- oder leerzeichengetrennt)
-                            const snText = snMatch[1].trim();
-                            const snParts = snText.split(/[,\s]+/).filter(s => s && s.length > 3);
-                            serials.push(...snParts);
+                            // Sammle alle SNs - auch aus Folgezeilen
+                            let snText = snMatch[1].trim();
+                            serials.push(...snText.split(/[,;\s]+/).filter(s => s.length >= 4 && /^[A-Za-z0-9_-]+$/.test(s)));
+
+                            // Pruefe folgende Zeilen auf weitere SNs
+                            for (let k = j + 1; k < Math.min(j + 5, lines.length); k++) {
+                                const snLine = lines[k].trim();
+                                if (!snLine || pricePattern.test(snLine)) break;
+                                if (/^(?:S\/N|SN|Seriennummer)[:\s]/i.test(snLine)) break;
+                                // Wenn Zeile wie eine SN aussieht (alphanumerisch, min 4 Zeichen)
+                                if (/^[A-Za-z0-9][A-Za-z0-9_-]{3,}$/.test(snLine)) {
+                                    serials.push(snLine);
+                                } else {
+                                    break;
+                                }
+                            }
                             continue;
                         }
 
-                        // Neue Artikelzeile? -> Stop
-                        if (/^(\d{4,}|\d+-\d+)\s+.*?\d+[.,]\d{2}/.test(nextLine)) break;
-
                         // Bezeichnungszeile (Manufacturer + Product Name)
-                        if (!productName || productName === 'N/A') {
-                            // Versuche Manufacturer und Product zu extrahieren
-                            // Format oft: "Hersteller Modellnummer" oder "Hersteller - Modellnummer"
-                            const parts = nextLine.split(/\s+[-–]\s+|\s{2,}/);
-                            if (parts.length >= 2) {
-                                manufacturer = parts[0].trim();
-                                productName = parts.slice(1).join(' ').trim();
-                            } else if (nextLine.length > 3 && !/^(Pos|Art|Artikel|Menge|ME|St)/i.test(nextLine)) {
-                                productName = nextLine.trim();
+                        if (!foundDescription && nextLine.length > 3) {
+                            // Ignoriere Header und Summen-Zeilen
+                            if (/^(Pos|Artikel|Menge|ME|Summe|Gesamt|Zwischen|Netto|Brutto|\d+[.,]\d{2})/i.test(nextLine)) continue;
+
+                            foundDescription = true;
+                            // Versuche Manufacturer vom Product Name zu trennen
+                            // Typische Formate: "HP ProLiant DL380", "Dell PowerEdge R740", "Cisco Catalyst 9300"
+                            const knownManufacturers = ['HP', 'HPE', 'Hewlett Packard', 'Dell', 'Cisco', 'IBM', 'Lenovo', 'Fujitsu', 'NetApp', 'EMC', 'VMware', 'Microsoft', 'Oracle', 'Juniper', 'Arista', 'Fortinet', 'Palo Alto', 'CheckPoint', 'F5', 'Citrix', 'Nutanix', 'Pure Storage', 'Hitachi', 'Huawei', 'Supermicro', 'QNAP', 'Synology', 'APC', 'Eaton', 'Vertiv'];
+
+                            let foundMfr = false;
+                            for (const mfr of knownManufacturers) {
+                                if (nextLine.toLowerCase().startsWith(mfr.toLowerCase())) {
+                                    manufacturer = mfr;
+                                    productName = nextLine.substring(mfr.length).trim();
+                                    // Entferne fuehrende Bindestriche oder Doppelpunkte
+                                    productName = productName.replace(/^[-:]\s*/, '');
+                                    foundMfr = true;
+                                    break;
+                                }
+                            }
+
+                            if (!foundMfr) {
+                                // Versuche am ersten Wort zu trennen wenn es gross geschrieben ist
+                                const words = nextLine.split(/\s+/);
+                                if (words.length >= 2 && /^[A-Z]{2,}$/.test(words[0])) {
+                                    manufacturer = words[0];
+                                    productName = words.slice(1).join(' ');
+                                } else {
+                                    productName = nextLine;
+                                }
                             }
                         }
                     }
 
-                    // Falls keine Seriennummern gefunden, suche weiter
-                    if (serials.length === 0) {
-                        for (let j = i + 1; j < Math.min(i + 8, lines.length); j++) {
-                            const snMatch = lines[j].match(/(?:S\/N:|SN:|Seriennummer:)\s*(.+)/i);
-                            if (snMatch) {
-                                const snText = snMatch[1].trim();
-                                const snParts = snText.split(/[,\s]+/).filter(s => s && s.length > 3);
-                                serials.push(...snParts);
-                            }
-                        }
-                    }
-
-                    if (productName !== 'N/A' || serials.length > 0) {
+                    if (productName || serials.length > 0) {
                         items.push({
                             productName: productName || 'N/A',
                             manufacturer,
-                            serials: serials.length > 0 ? serials : ['n.a.'],
+                            serials: serials.length > 0 ? serials : ['tba'],
                             sla: globalSla,
                             country,
                             duration: globalDuration,
                             purchaseCost: einzelpreis,
+                            serviceStart,
+                            serviceEnde,
                             menge
                         });
                     }
                 }
             }
 
-            // Fallback: Wenn keine Artikel gefunden, versuche altes S/N-basiertes Parsing
+            // Fallback: S/N-basiertes Parsing wenn keine strukturierten Daten gefunden
             if (items.length === 0) {
-                const productBlocks = rawText.split(/(?=(?:S\/N:|SN:|Seriennummer:))/i);
-
-                productBlocks.forEach(block => {
-                    if (!block.trim()) return;
-
-                    const snMatch = block.match(/(?:S\/N:|SN:|Seriennummer:)\s*([A-Za-z0-9-]+)/i);
-                    if (!snMatch) return;
-
-                    const serial = snMatch[1].trim();
-                    let productName = 'N/A';
-                    const blockLines = block.split('\n').map(l => l.trim()).filter(l => l);
-
-                    for (const bLine of blockLines) {
-                        if (/^(?:S\/N:|SN:|Seriennummer:)/i.test(bLine)) continue;
-                        if (/^\d+[.,]\d{2}\s*€?$/.test(bLine)) continue;
-
-                        const modelMatch = bLine.match(/([A-Z][A-Za-z0-9-]+(?:\s+[A-Z0-9-]+)+)/);
-                        if (modelMatch && modelMatch[1].length > 3) {
-                            productName = modelMatch[1].trim();
-                            break;
-                        }
+                // Suche alle S/N: Eintraege
+                const snRegex = /(?:S\/N|SN|Seriennummer)[:\s]+([A-Za-z0-9][A-Za-z0-9_-]*)/gi;
+                const allSerials = [];
+                let match;
+                while ((match = snRegex.exec(rawText)) !== null) {
+                    if (match[1].length >= 4) {
+                        allSerials.push(match[1]);
                     }
+                }
 
-                    let price = 0;
-                    const priceMatches = block.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€?/g);
-                    if (priceMatches && priceMatches.length > 0) {
-                        const lastPrice = priceMatches[priceMatches.length - 1];
-                        let cleanPrice = lastPrice.replace(/[€\s]/g, '').trim();
-                        if (cleanPrice.includes(',') && cleanPrice.indexOf(',') > cleanPrice.lastIndexOf('.')) {
-                            cleanPrice = cleanPrice.replace(/\./g, '').replace(',', '.');
-                        } else if (cleanPrice.includes('.') && cleanPrice.indexOf('.') > cleanPrice.lastIndexOf(',')) {
-                            cleanPrice = cleanPrice.replace(/,/g, '');
-                        }
-                        price = parseFloat(cleanPrice) || 0;
+                // Suche nach Produktbezeichnungen
+                const productPatterns = [
+                    /(?:ProLiant|PowerEdge|Catalyst|UCS|FlashArray|VNX|Unity)[^\n]+/gi,
+                    /(?:Server|Switch|Storage|Firewall|Router)[^\n]+/gi
+                ];
+
+                let productName = 'N/A';
+                for (const pattern of productPatterns) {
+                    const pMatch = rawText.match(pattern);
+                    if (pMatch) {
+                        productName = pMatch[0].trim();
+                        break;
                     }
+                }
 
+                // Suche nach Preis
+                let price = 0;
+                const priceMatches = rawText.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€/g);
+                if (priceMatches && priceMatches.length > 0) {
+                    const firstPrice = priceMatches[0];
+                    let clean = firstPrice.replace(/[€\s]/g, '').trim();
+                    if (clean.includes(',')) {
+                        clean = clean.replace(/\./g, '').replace(',', '.');
+                    }
+                    price = parseFloat(clean) || 0;
+                }
+
+                if (allSerials.length > 0 || productName !== 'N/A') {
                     items.push({
                         productName,
                         manufacturer: '',
-                        serials: [serial],
+                        serials: allSerials.length > 0 ? allSerials : ['tba'],
                         sla: globalSla,
                         country,
                         duration: globalDuration,
                         purchaseCost: price,
-                        menge: 1
+                        serviceStart,
+                        serviceEnde,
+                        menge: allSerials.length || 1
                     });
-                });
-
-                // Gruppieren nach Produktname
-                const grouped = {};
-                items.forEach(item => {
-                    const key = `${item.productName}|${item.sla}|${item.purchaseCost}`;
-                    if (!grouped[key]) {
-                        grouped[key] = { ...item, serials: [] };
-                    }
-                    grouped[key].serials.push(...item.serials);
-                });
-                return Object.values(grouped);
+                }
             }
 
             return items;
@@ -2592,10 +2646,13 @@
             tbody.innerHTML = '';
 
             data.forEach((item, index) => {
-                // Purchase Cost ist der Einzelpreis (fuer gesamte Laufzeit)
+                // Purchase Cost ist der Einzelpreis
                 const purchaseCost = item.purchaseCost.toFixed(2);
                 const unitPrice = (item.purchaseCost * multiplier).toFixed(2);
-                const description = `S/N: ${item.serials.join(', ') || 'n.a.'}`;
+                // Description mit S/N, Service Start und Service Ende
+                const serviceStart = item.serviceStart || 'tba';
+                const serviceEnde = item.serviceEnde || 'tba';
+                const description = `S/N: ${item.serials.join(', ') || 'tba'}\nService Start: ${serviceStart}\nService Ende: ${serviceEnde}`;
                 // Verwende extrahierten Manufacturer wenn vorhanden, sonst Default
                 const itemManufacturer = item.manufacturer || manufacturerDefault;
                 const itemCountry = getCountryForLanguage(item.country || countryDefault, 'de');
@@ -2604,7 +2661,10 @@
                 row.innerHTML = `
                     <td contenteditable="true">${item.productName}</td>
                     <td>1</td>
-                    <td><input type="text" value="${itemManufacturer}" class="dispdf-manufacturer-input" style="width:100%;"></td>
+                    <td>
+                        <input type="text" value="${itemManufacturer}" class="dispdf-manufacturer-input" style="width:calc(100% - 25px);">
+                        <button class="dispdf-search-btn" title="Manufacturer suchen" style="width:22px;padding:2px;">🔍</button>
+                    </td>
                     <td>Wartung</td>
                     <td>DIS Daten-IT-Service GmbH</td>
                     <td contenteditable="true">${unitPrice}</td>
@@ -2618,6 +2678,18 @@
                     <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
                 `;
                 tbody.appendChild(row);
+            });
+
+            // Event-Handler fuer Such-Buttons
+            tbody.querySelectorAll('.dispdf-search-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const row = e.target.closest('tr');
+                    const productName = row.cells[0].textContent.trim();
+                    if (productName && productName !== 'N/A') {
+                        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(productName + ' manufacturer')}`;
+                        window.open(searchUrl, '_blank');
+                    }
+                });
             });
         }
 
@@ -2721,9 +2793,9 @@
                     <tbody></tbody>
                 </table>
             </div>
-            <div class="imp-form-group" style="margin-top:10px;">
+            <div class="imp-form-group" style="margin-top:10px; display:flex; gap:10px;">
                 <button id="idspdf-download">CSV speichern</button>
-                <button id="idspdf-lang-toggle" style="margin-left:10px;">Sprache: DE → EN</button>
+                <button id="idspdf-lang-toggle">Sprache: DE → EN</button>
             </div>
         `;
 
@@ -2813,14 +2885,14 @@
                         rawLines: [line],
                         seriennummern: '',
                         seriennummerCount: 0,
-                        sla: 'tba.',
-                        serviceStart: 'tba.',
-                        serviceEnde: 'tba.',
+                        sla: 'tba',
+                        serviceStart: 'tba',
+                        serviceEnde: 'tba',
                         stueck: qty,
                         einzelpreis: 0,
                         gesamtpreis: 0,
                         durationInMonths: 12,
-                        artikelnummer: 'tba.',
+                        artikelnummer: 'tba',
                         country
                     });
                     lastIdxProduct = items.length - 1;
@@ -2900,21 +2972,44 @@
                 const durationMatch = blockText.match(/Laufzeit:\s*(\d+)\s*Monate/i);
                 if (durationMatch) item.durationInMonths = parseInt(durationMatch[1], 10);
 
-                // Prices
-                const normalize = str => str.replace(/,/g, '');
-                let priceMatch = blockText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})\s+(\d{1,3}(?:,\d{3})*\.\d{2})/);
+                // Prices - unterstuetze deutsches (1.234,56) und englisches (1,234.56) Format
+                const parsePrice = (str) => {
+                    if (!str) return 0;
+                    let clean = str.replace(/[€\s]/g, '').trim();
+                    // Deutsches Format: Punkt als Tausender, Komma als Dezimal
+                    if (clean.includes(',') && (clean.indexOf(',') > clean.lastIndexOf('.') || !clean.includes('.'))) {
+                        clean = clean.replace(/\./g, '').replace(',', '.');
+                    } else {
+                        // Englisches Format: Komma als Tausender, Punkt als Dezimal
+                        clean = clean.replace(/,/g, '');
+                    }
+                    return parseFloat(clean) || 0;
+                };
+
+                // Suche nach Preisen im Block - deutsches oder englisches Format
+                // Deutsches Format: 1.234,56 oder 1234,56
+                // Englisches Format: 1,234.56 oder 1234.56
+                let priceMatch = blockText.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s+(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})/);
                 if (!priceMatch) {
-                    const altMatch = blockText.match(/(\d{1,3}(?:,\d{3})*\.\d{2})\s*\(\s*(\d{1,3}(?:,\d{3})*\.\d{2})\s*\)/);
+                    // Alternativ: Preise in Klammern
+                    const altMatch = blockText.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*\(\s*(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*\)/);
                     if (altMatch) priceMatch = altMatch;
                 }
+                if (!priceMatch) {
+                    // Fallback: Einzelner Preis am Ende
+                    const singlePrice = blockText.match(/(\d{1,3}(?:[.,]\d{3})*[.,]\d{2})\s*€?\s*$/);
+                    if (singlePrice) {
+                        item.einzelpreis = parsePrice(singlePrice[1]);
+                    }
+                }
                 if (priceMatch) {
-                    item.einzelpreis = parseFloat(normalize(priceMatch[1]));
-                    item.gesamtpreis = parseFloat(normalize(priceMatch[2]));
+                    item.einzelpreis = parsePrice(priceMatch[1]);
+                    item.gesamtpreis = parsePrice(priceMatch[2]);
                 }
 
                 if (!item.seriennummerCount) {
                     item.seriennummerCount = item.stueck;
-                    item.seriennummern = Array(item.stueck).fill('tba.').join(', ');
+                    item.seriennummern = Array(item.stueck).fill('tba').join(', ');
                 }
             });
 
@@ -2932,7 +3027,7 @@
                 // Purchase Cost ist der Einzelpreis
                 const purchaseCost = item.einzelpreis.toFixed(2);
                 const unitPrice = (item.einzelpreis * multiplier).toFixed(2);
-                const description = `S/N: ${item.seriennummern || 'n.a.'}\nService Start: ${item.serviceStart}\nService Ende: ${item.serviceEnde}`;
+                const description = `S/N: ${item.seriennummern || 'tba'}\nService Start: ${item.serviceStart}\nService Ende: ${item.serviceEnde}`;
                 // Laender normalisieren
                 const itemCountry = getCountryForLanguage(item.country || countryInput, 'de');
 
@@ -2940,7 +3035,10 @@
                 row.innerHTML = `
                     <td contenteditable="true">${item.artikelnummer}</td>
                     <td>1</td>
-                    <td><input type="text" value="${manufacturer}" class="idspdf-manufacturer-input" style="width:100%;"></td>
+                    <td>
+                        <input type="text" value="${manufacturer}" class="idspdf-manufacturer-input" style="width:calc(100% - 25px);">
+                        <button class="idspdf-search-btn" title="Manufacturer suchen" style="width:22px;padding:2px;">🔍</button>
+                    </td>
                     <td>Wartung</td>
                     <td>Inter Data Systems GmbH</td>
                     <td contenteditable="true">${unitPrice}</td>
@@ -2954,6 +3052,18 @@
                     <td><button onclick="this.closest('tr').remove();" class="imp-btn-danger">X</button></td>
                 `;
                 tbody.appendChild(row);
+            });
+
+            // Event-Handler fuer Such-Buttons
+            tbody.querySelectorAll('.idspdf-search-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const row = e.target.closest('tr');
+                    const productName = row.cells[0].textContent.trim();
+                    if (productName && productName !== 'tba' && productName !== 'N/A') {
+                        const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(productName + ' manufacturer')}`;
+                        window.open(searchUrl, '_blank');
+                    }
+                });
             });
         }
 
