@@ -1715,6 +1715,18 @@
 
             try {
                 const emailData = await readMsgFile(file);
+
+                // Debug: Zeige Body-Inhalt
+                console.log('=== ITRIS EMAIL DEBUG ===');
+                console.log('Body Typ:', typeof emailData.body);
+                console.log('Body Laenge:', emailData.body ? emailData.body.length : 0);
+                console.log('Body Inhalt (erste 2000 Zeichen):', emailData.body ? emailData.body.substring(0, 2000) : 'LEER');
+                console.log('Body HTML vorhanden:', !!emailData.bodyHTML);
+                if (emailData.bodyHTML) {
+                    console.log('Body HTML (erste 2000 Zeichen):', emailData.bodyHTML.substring(0, 2000));
+                }
+                console.log('=========================');
+
                 const { products, angebotsnummer, standort } = parseItrisEmail(emailData.body, emailData.subject);
 
                 parsedStandort = standort;
