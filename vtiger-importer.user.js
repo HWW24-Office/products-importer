@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.2
+// @version      1.10.3
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -569,7 +569,31 @@
                     let bodyText = fileData.body || '';
                     // Falls body kein String ist, versuche zu konvertieren
                     if (typeof bodyText !== 'string') {
-                        if (bodyText && bodyText.toString) {
+                        // ZUERST auf binaere Daten pruefen (ArrayBuffer, Uint8Array)
+                        if (bodyText instanceof ArrayBuffer) {
+                            try {
+                                const decoder = new TextDecoder('utf-8');
+                                bodyText = decoder.decode(bodyText);
+                            } catch (e) {
+                                bodyText = '';
+                            }
+                        } else if (bodyText instanceof Uint8Array || (bodyText && bodyText.buffer instanceof ArrayBuffer)) {
+                            try {
+                                const decoder = new TextDecoder('utf-8');
+                                bodyText = decoder.decode(bodyText);
+                            } catch (e) {
+                                bodyText = '';
+                            }
+                        } else if (bodyText && typeof bodyText === 'object' && bodyText.length !== undefined) {
+                            // Array-aehnliches Objekt (z.B. Array von Bytes)
+                            try {
+                                const uint8 = new Uint8Array(bodyText);
+                                const decoder = new TextDecoder('utf-8');
+                                bodyText = decoder.decode(uint8);
+                            } catch (e) {
+                                bodyText = '';
+                            }
+                        } else if (bodyText && bodyText.toString) {
                             bodyText = bodyText.toString();
                         } else {
                             bodyText = '';
@@ -578,7 +602,17 @@
 
                     let bodyHTML = fileData.bodyHTML || '';
                     if (typeof bodyHTML !== 'string') {
-                        bodyHTML = '';
+                        // Gleiche Logik fuer HTML
+                        if (bodyHTML instanceof ArrayBuffer || bodyHTML instanceof Uint8Array) {
+                            try {
+                                const decoder = new TextDecoder('utf-8');
+                                bodyHTML = decoder.decode(bodyHTML);
+                            } catch (e) {
+                                bodyHTML = '';
+                            }
+                        } else {
+                            bodyHTML = '';
+                        }
                     }
 
                     const result = {
@@ -598,13 +632,19 @@
 
                     // Finale Sicherheitspruefung: result.body MUSS ein String sein
                     if (typeof result.body !== 'string') {
-                        if (result.body && result.body.toString) {
-                            result.body = result.body.toString();
-                        } else if (result.body && typeof result.body === 'object') {
-                            // Falls body ein Objekt ist (z.B. ArrayBuffer), versuche zu dekodieren
+                        // Binaere Daten zuerst pruefen
+                        if (result.body instanceof ArrayBuffer || result.body instanceof Uint8Array) {
                             try {
                                 const decoder = new TextDecoder('utf-8');
                                 result.body = decoder.decode(result.body);
+                            } catch (e) {
+                                result.body = '';
+                            }
+                        } else if (result.body && typeof result.body === 'object' && result.body.length !== undefined) {
+                            try {
+                                const uint8 = new Uint8Array(result.body);
+                                const decoder = new TextDecoder('utf-8');
+                                result.body = decoder.decode(uint8);
                             } catch (e) {
                                 result.body = '';
                             }
