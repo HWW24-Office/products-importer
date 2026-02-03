@@ -634,20 +634,30 @@
         if (!rtf || typeof rtf !== 'string') return '';
 
         // Pruefe ob es encapsulated HTML ist (\fromhtml1)
-        const isEncapsulatedHtml = rtf.includes('\\fromhtml');
+        const isEncapsulatedHtml = rtf.includes('\\fromhtml') || rtf.includes('fromhtml');
 
         if (isEncapsulatedHtml) {
             console.log('RTF enthaelt encapsulated HTML, extrahiere...');
-            // Bei encapsulated HTML: Entferne \htmlrtf...\htmlrtf0 Bloecke (RTF-only content)
             let html = rtf;
 
-            // Entferne RTF-Header bis zum Body
-            html = html.replace(/^\{\\rtf1[^}]*\}?/i, '');
+            // Entferne RTF-Header (alles bis zum ersten htmltag oder Body-Content)
+            html = html.replace(/^\{\\rtf1[^]*?\\htmltag/i, '\\htmltag');
 
-            // Entferne \htmlrtf ... \htmlrtf0 Bloecke (RTF-spezifischer Content)
-            html = html.replace(/\\htmlrtf[^0][^\\]*\\htmlrtf0\s?/gi, '');
-            html = html.replace(/\\htmlrtf\s?/gi, '');
-            html = html.replace(/\\htmlrtf0\s?/gi, '');
+            // Entferne font-table und color-table Definitionen
+            html = html.replace(/\{\\fonttbl[^}]*\}/gi, '');
+            html = html.replace(/\{\\colortbl[^}]*\}/gi, '');
+            html = html.replace(/\{\\\*\\htmltag\d+[^}]*\}/gi, '');
+
+            // Entferne htmlrtf-Bloecke (RTF-only content) - auch korrupte Varianten
+            html = html.replace(/\\htmlrtf[01]?\s?/gi, '');
+            html = html.replace(/ahtmlrtf\w*/gi, '');
+            html = html.replace(/ghtmlrtf\w*/gi, '');
+
+            // Entferne korrupte RTF-Artefakte (aus LZFu-Dekompression)
+            html = html.replace(/[0a]reen\d*/gi, '');
+            html = html.replace(/gree\d*/gi, '');
+            html = html.replace(/ugreen\w*/gi, '');
+            html = html.replace(/\d+areen\d*/gi, '');
 
             // Konvertiere RTF-Escapes
             html = html.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
@@ -663,15 +673,18 @@
             html = html.replace(/\\[a-z0-9*-]+\s?/gi, '');
             html = html.replace(/[{}]/g, '');
 
-            // Jetzt haben wir HTML - konvertiere zu Text
-            // Ersetze HTML-Elemente durch Struktur
+            // Entferne HTML-Style-Bloecke
+            html = html.replace(/<style[^>]*>[^<]*<\/style>/gi, '');
+            html = html.replace(/<!--[^>]*-->/g, '');
+
+            // Konvertiere HTML zu Text
             html = html.replace(/<br\s*\/?>/gi, '\n');
             html = html.replace(/<\/tr>/gi, '\n');
             html = html.replace(/<\/p>/gi, '\n');
             html = html.replace(/<\/div>/gi, '\n');
             html = html.replace(/<\/td>/gi, '\t');
             html = html.replace(/<\/th>/gi, '\t');
-            html = html.replace(/<[^>]+>/g, ''); // Alle HTML-Tags entfernen
+            html = html.replace(/<[^>]+>/g, '');
 
             // HTML-Entities dekodieren
             html = html.replace(/&nbsp;/gi, ' ');
@@ -680,6 +693,8 @@
             html = html.replace(/&gt;/gi, '>');
             html = html.replace(/&quot;/gi, '"');
             html = html.replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code)));
+            // Korrupte nbsp-Varianten
+            html = html.replace(/&nbsr?;?/gi, ' ');
 
             // Bereinigen
             html = html.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -687,6 +702,9 @@
             html = html.replace(/\n +/g, '\n');
             html = html.replace(/ +\n/g, '\n');
             html = html.replace(/\n{3,}/g, '\n\n');
+            // Entferne isolierte Zahlen und Buchstaben (Artefakte)
+            html = html.replace(/\n[0-9a-z]{1,2}\n/gi, '\n');
+            html = html.replace(/^[0-9a-z]{1,2}\n/gi, '');
 
             return html.trim();
         }
