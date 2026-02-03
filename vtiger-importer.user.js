@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.9.0
+// @version      1.9.1
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -549,7 +549,17 @@
             reader.onload = (e) => {
                 try {
                     const arrayBuffer = e.target.result;
-                    const msgReader = new MsgReader(arrayBuffer);
+
+                    // MsgReader kann als Modul oder global verfuegbar sein
+                    let MsgReaderClass = window.MsgReader;
+                    if (!MsgReaderClass && typeof MsgReader !== 'undefined') {
+                        MsgReaderClass = MsgReader;
+                    }
+                    if (!MsgReaderClass) {
+                        throw new Error('MsgReader Bibliothek nicht geladen. Bitte Seite neu laden.');
+                    }
+
+                    const msgReader = new MsgReaderClass(arrayBuffer);
                     const fileData = msgReader.getFileData();
 
                     // E-Mail-Daten extrahieren
@@ -1051,8 +1061,25 @@
                             subject.match(/(#\d+-\d+[a-z]*\d*)/i);
             const reference = refMatch ? refMatch[1] : '';
 
-            // Produkt-Pattern: Produktname gefolgt von "Full Service SLA: X/X/X" und Preis
-            let currentProduct = null;
+            // 1. Zuerst echte Produktnamen aus E-Mail-Verlauf extrahieren
+            // Pattern: "Storage 1: Seagate 4825..." oder "Server 1: Dell PowerEdge..."
+            const productMappings = {};
+            const mappingPattern = /(Storage|Server|System|Gerät|Device|Unit)\s*(\d+)\s*[:]\s*([^\n\r(]+)/gi;
+            let mappingMatch;
+            while ((mappingMatch = mappingPattern.exec(body)) !== null) {
+                const key = (mappingMatch[1] + ' ' + mappingMatch[2]).toLowerCase().trim();
+                let realName = mappingMatch[3].trim();
+                // Entferne trailing "(PDF ...)" oder aehnliches
+                realName = realName.replace(/\s*\(PDF[^)]*\)\s*$/i, '').trim();
+                if (realName.length > 3) {
+                    productMappings[key] = realName;
+                }
+            }
+            console.log('Gefundene Produkt-Mappings:', productMappings);
+
+            // 2. Angebot parsen
+            let currentProductKey = '';
+            let currentProductName = '';
 
             for (let i = 0; i < lines.length; i++) {
                 const line = lines[i].trim();
@@ -1063,6 +1090,14 @@
                     break;
                 }
 
+                // Pruefen ob es eine Produktzeile ist (z.B. "Storage 1 gem. Anfrage")
+                const productLineMatch = line.match(/^(Storage|Server|System|Gerät|Device|Unit)\s*(\d+)\s*(gem\.|gemäß|laut)?/i);
+                if (productLineMatch) {
+                    currentProductKey = (productLineMatch[1] + ' ' + productLineMatch[2]).toLowerCase().trim();
+                    // Versuche echten Namen aus Mapping zu holen
+                    currentProductName = productMappings[currentProductKey] || line;
+                }
+
                 // Prüfen ob es eine SLA-Zeile ist
                 const slaMatch = line.match(/Full Service SLA:\s*([0-9x\/]+(?:NBD)?)\/?-?\s*\(.*?\)\s*([\d.,]+)\s*[€]/i);
 
@@ -1071,34 +1106,28 @@
                     const priceStr = slaMatch[2].replace('.', '').replace(',', '.');
                     const price = parseFloat(priceStr);
 
-                    // Produktname aus vorherigen Zeilen finden
-                    let productName = '';
-                    for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
-                        const prevLine = lines[j].trim();
-                        if (prevLine && !prevLine.includes('Full Service') && !prevLine.includes('€') &&
-                            !prevLine.includes('Angebot') && prevLine.length > 2 && prevLine.length < 200) {
-                            productName = prevLine;
-                            break;
+                    // Wenn kein aktueller Produktname, aus vorherigen Zeilen suchen
+                    let productName = currentProductName;
+                    if (!productName) {
+                        for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+                            const prevLine = lines[j].trim();
+                            if (prevLine && !prevLine.includes('Full Service') && !prevLine.includes('€') &&
+                                !prevLine.includes('Angebot') && prevLine.length > 2 && prevLine.length < 200) {
+                                productName = prevLine;
+                                break;
+                            }
                         }
                     }
 
                     if (productName && !isNaN(price)) {
                         // SLA normalisieren
                         let sla = slaRaw;
-                        for (const [key, value] of Object.entries(slaMappings)) {
-                            if (slaRaw.toLowerCase().includes(key.toLowerCase().replace(/x/g, '')) ||
-                                slaRaw.toLowerCase() === key.toLowerCase()) {
-                                sla = value;
-                                break;
-                            }
-                        }
-                        // Vereinfachte SLA-Erkennung
                         if (slaRaw.includes('NBD') || slaRaw.includes('nbd')) {
                             sla = '5x9xNBD';
                         } else if (slaRaw.match(/7.*24.*4/)) {
                             sla = '7x24x4';
-                        } else if (slaRaw.match(/5.*9.*NBD/i)) {
-                            sla = '5x9xNBD';
+                        } else if (slaRaw.match(/5.*13.*4/)) {
+                            sla = '5x13x4';
                         }
 
                         products.push({
