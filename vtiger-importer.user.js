@@ -565,6 +565,31 @@
                     const msgReader = new MsgReaderClass(arrayBuffer);
                     const fileData = msgReader.getFileData();
 
+                    // DEBUG: Zeige MsgReader-Methoden und alle Daten
+                    console.log('=== MsgReader Object ===');
+                    console.log('MsgReader methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(msgReader)));
+                    console.log('MsgReader own keys:', Object.keys(msgReader));
+
+                    // Versuche verschiedene Body-Formate
+                    const possibleBodyProps = ['body', 'bodyHTML', 'bodyRtf', 'bodyText', 'htmlBody', 'rtfBody', 'compressedRtf'];
+                    for (const prop of possibleBodyProps) {
+                        if (fileData[prop]) {
+                            console.log(`fileData.${prop} exists:`, typeof fileData[prop], fileData[prop].length || fileData[prop].byteLength || 'N/A');
+                        }
+                        if (msgReader[prop]) {
+                            console.log(`msgReader.${prop} exists:`, typeof msgReader[prop]);
+                        }
+                    }
+
+                    // Pruefe ob getBody oder aehnliche Methoden existieren
+                    if (typeof msgReader.getBody === 'function') {
+                        console.log('msgReader.getBody():', msgReader.getBody());
+                    }
+                    if (typeof msgReader.getBodyHTML === 'function') {
+                        console.log('msgReader.getBodyHTML():', msgReader.getBodyHTML());
+                    }
+                    console.log('========================');
+
                     // DEBUG: Zeige alle verfuegbaren Properties
                     console.log('=== MSG FileData DEBUG ===');
                     console.log('Alle Keys:', Object.keys(fileData));
