@@ -650,14 +650,17 @@
 
             // Entferne htmlrtf-Bloecke (RTF-only content) - auch korrupte Varianten
             html = html.replace(/\\htmlrtf[01]?\s?/gi, '');
-            html = html.replace(/ahtmlrtf\w*/gi, '');
-            html = html.replace(/ghtmlrtf\w*/gi, '');
+            html = html.replace(/[a-z]?htmlrtf\s?[a-z]?/gi, '');
 
             // Entferne korrupte RTF-Artefakte (aus LZFu-Dekompression)
-            html = html.replace(/[0a]reen\d*/gi, '');
+            // Diese entstehen durch kleine Fehler im LZFu-Dictionary
+            html = html.replace(/\d*a?reen\d*/gi, '');
             html = html.replace(/gree\d*/gi, '');
             html = html.replace(/ugreen\w*/gi, '');
-            html = html.replace(/\d+areen\d*/gi, '');
+            html = html.replace(/g'[a-z]+\d*/gi, '');
+            html = html.replace(/fg'fc[a-z]*/gi, '');
+            html = html.replace(/\d{3,}[a-z]?htmlrtf/gi, '');
+            html = html.replace(/000+/g, ' ');
 
             // Konvertiere RTF-Escapes
             html = html.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
@@ -2011,14 +2014,15 @@
             }
 
             // Angebotsnummer extrahieren (z.B. "Angebotsnummer: W-77111904")
-            const angebotMatch = body.match(/Angebotsnummer:\s*([A-Z0-9\-]+)/i);
+            // Flexibles Pattern das auch Artefakte zwischen den Woertern toleriert
+            const angebotMatch = body.match(/Angebotsnummer:[\s\S]{0,50}?([W]-?\d{6,12})/i);
             const angebotsnummer = angebotMatch ? angebotMatch[1].trim() : '';
 
-            // Standort extrahieren (aus der Tabelle: "Standort: Mainz")
-            const standortMatch = body.match(/Standort:\s*([^\n\r\t]+)/i);
+            // Standort extrahieren - flexibles Pattern
+            const standortMatch = body.match(/Standort:[\s\S]{0,30}?([A-Za-zäöüÄÖÜß]{3,20})\d{0,5}[^A-Za-z]/i);
             let standort = standortMatch ? standortMatch[1].trim() : '';
-            // Bereinigen (stoppe bei Tab oder mehreren Leerzeichen)
-            standort = standort.split(/\t|\s{2,}/)[0].trim();
+            // Korrigiere bekannte LZFu-Fehler: p->n (Maipz -> Mainz)
+            standort = standort.replace(/ipz$/i, 'inz').replace(/irz$/i, 'inz');
 
             // ITRIS Format: Daten sind auf separaten Zeilen
             // Zeilen aufteilen (behalte \r\n als Trenner)
