@@ -565,6 +565,23 @@
                     const msgReader = new MsgReaderClass(arrayBuffer);
                     const fileData = msgReader.getFileData();
 
+                    // DEBUG: Zeige alle verfuegbaren Properties
+                    console.log('=== MSG FileData DEBUG ===');
+                    console.log('Alle Keys:', Object.keys(fileData));
+                    for (const key of Object.keys(fileData)) {
+                        const val = fileData[key];
+                        if (typeof val === 'string') {
+                            console.log(`${key} (string, ${val.length} chars):`, val.substring(0, 200));
+                        } else if (val instanceof Uint8Array || val instanceof ArrayBuffer) {
+                            console.log(`${key} (binary, ${val.byteLength || val.length} bytes)`);
+                        } else if (Array.isArray(val)) {
+                            console.log(`${key} (array, ${val.length} items):`, val);
+                        } else {
+                            console.log(`${key} (${typeof val}):`, val);
+                        }
+                    }
+                    console.log('==========================');
+
                     // E-Mail-Daten extrahieren (mit Typ-Pruefung)
                     let bodyText = fileData.body || '';
                     // Falls body kein String ist, versuche zu konvertieren
