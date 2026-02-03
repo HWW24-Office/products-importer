@@ -2192,9 +2192,9 @@
 
                 // Suche nach Seriennummern gefolgt von 3 Preisen (mit beliebigen Artefakten dazwischen)
                 // S/N Pattern: Buchstabe + alphanumerisch 6-10 Zeichen
-                // Preise: XX,XX mit optionalem Euro-Zeichen oder "a'80" (korruptes €)
+                // Preise: XX, oder XX,XX mit optionalem Euro-Zeichen (Nachkommastellen können fehlen durch LZFu)
                 // Die 0+ vor den Preisen sind Artefakte die wir ignorieren
-                const snPattern = /([A-Z][A-Z0-9]{5,10})[\s\S]{0,50}?0*(\d{1,3}[.,]\d{2})\s*(?:€|a'80)?[\s\S]{0,50}?0*(\d{1,3}[.,]\d{2})\s*(?:€|a'80)?[\s\S]{0,50}?0*(\d{1,3}[.,]\d{2})\s*(?:€|a'80)?/gi;
+                const snPattern = /([A-Z][A-Z0-9]{5,10})[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€/gi;
                 let match;
 
                 while ((match = snPattern.exec(body)) !== null) {
