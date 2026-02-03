@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer (Loader)
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.2.3
+// @version      1.2.4
 // @description  Laedt den VTiger Products Importer automatisch von GitHub (inkl. MSG-Support)
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -89,7 +89,7 @@
         });
     }
 
-    const LOADER_VERSION = '1.2.3';
+    const LOADER_VERSION = '1.2.4';
 
     // Hauptfunktion
     async function init() {
@@ -105,36 +105,48 @@
             console.log('[VTiger Importer] PDF.js geladen');
 
             // 2. MsgReader laden via GM_xmlhttpRequest (umgeht CORS)
-            await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: 'https://cdn.jsdelivr.net/npm/@poplor/msgreader@3.2.0/dist/MsgReader.umd.min.js',
-                    onload: function(response) {
-                        if (response.status === 200) {
-                            try {
-                                // Script als inline ausfuehren
-                                const script = document.createElement('script');
-                                script.textContent = response.responseText;
-                                document.head.appendChild(script);
-                                console.log('[VTiger Importer] MsgReader v3.2.0 geladen (via GM_xmlhttpRequest)');
-                                resolve();
-                            } catch (e) {
-                                console.error('[VTiger Importer] MsgReader eval fehlgeschlagen:', e);
-                                reject(e);
-                            }
-                        } else {
-                            reject(new Error('Failed to load MsgReader: ' + response.status));
-                        }
-                    },
-                    onerror: function(error) {
-                        console.error('[VTiger Importer] MsgReader laden fehlgeschlagen:', error);
-                        reject(error);
-                    }
-                });
-            });
+            // Versuche verschiedene URLs
+            const msgReaderUrls = [
+                'https://cdn.jsdelivr.net/npm/@poplor/msgreader@3/dist/MsgReader.umd.js',
+                'https://cdn.jsdelivr.net/npm/msgreader@3/dist/MsgReader.umd.js',
+                'https://unpkg.com/@poplor/msgreader@3/dist/MsgReader.umd.js',
+                'https://unpkg.com/msgreader@1.0.1/dist/MsgReader.js'
+            ];
 
-            // Fallback: esm.sh wenn MsgReader nicht verfuegbar
-            if (!window.MsgReader) {
+            let msgReaderLoaded = false;
+            for (const url of msgReaderUrls) {
+                if (msgReaderLoaded) break;
+                try {
+                    await new Promise((resolve, reject) => {
+                        GM_xmlhttpRequest({
+                            method: 'GET',
+                            url: url,
+                            onload: function(response) {
+                                if (response.status === 200 && response.responseText.length > 1000) {
+                                    try {
+                                        const script = document.createElement('script');
+                                        script.textContent = response.responseText;
+                                        document.head.appendChild(script);
+                                        console.log('[VTiger Importer] MsgReader geladen von:', url);
+                                        msgReaderLoaded = true;
+                                        resolve();
+                                    } catch (e) {
+                                        reject(e);
+                                    }
+                                } else {
+                                    reject(new Error('Status: ' + response.status));
+                                }
+                            },
+                            onerror: reject
+                        });
+                    });
+                } catch (e) {
+                    console.log('[VTiger Importer] URL fehlgeschlagen:', url, e.message || e);
+                }
+            }
+
+            // Fallback: esm.sh
+            if (!msgReaderLoaded || !window.MsgReader) {
                 console.log('[VTiger Importer] Fallback zu esm.sh...');
                 await loadESModule('https://esm.sh/msgreader@1.0.1', 'MsgReader');
                 console.log('[VTiger Importer] MsgReader v1.0.1 (esm.sh) geladen');
