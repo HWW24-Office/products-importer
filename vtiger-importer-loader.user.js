@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer (Loader)
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.2.0
+// @version      1.2.1
 // @description  Laedt den VTiger Products Importer automatisch von GitHub (inkl. MSG-Support)
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -87,7 +87,7 @@
         });
     }
 
-    const LOADER_VERSION = '1.2.0';
+    const LOADER_VERSION = '1.2.1';
 
     // Hauptfunktion
     async function init() {
@@ -102,9 +102,9 @@
             await injectScript(PDFJS_URL);
             console.log('[VTiger Importer] PDF.js geladen');
 
-            // 2. MsgReader als ES-Modul laden (ueber esm.sh)
-            await loadESModule('https://esm.sh/msgreader@1.0.1', 'MsgReader');
-            console.log('[VTiger Importer] MsgReader geladen');
+            // 2. MsgReader als ES-Modul laden (ueber esm.sh) - Version 3.x hat bessere HTML-Unterstuetzung
+            await loadESModule('https://esm.sh/@poplor/msgreader@3.2.0', 'MsgReader');
+            console.log('[VTiger Importer] MsgReader v3.2.0 geladen');
 
             // 3. Hauptscript von GitHub laden
             const mainScript = await loadScript(SCRIPT_URL);
