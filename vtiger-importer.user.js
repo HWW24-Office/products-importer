@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.11.1
+// @version      1.11.2
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -2180,107 +2180,89 @@
                 }
             }
 
-            // Vierter Fallback: ITRIS RTF-Format - vereinfachter Ansatz
+            // Vierter Fallback: ITRIS RTF-Format - nur S/N: Pattern verwenden
             if (products.length === 0) {
-                console.log('Versuche ITRIS RTF-Format zu parsen (vereinfacht)...');
+                console.log('Versuche ITRIS RTF-Format zu parsen...');
 
-                // Schritt 1: Finde alle Seriennummern
-                // Pattern 1: Alphanumerisch 6-12 Zeichen (beginnt mit Buchstabe)
-                // Pattern 2: Nach "S/N:" oder "S/N :" suchen
+                // Nur S/N: Pattern verwenden - das ist zuverlaessig
                 let snMatches = [];
 
-                // Methode A: Suche im Produktbereich nach alphanumerischen S/N
-                const snPattern1 = body.match(/[A-Z][A-Z0-9]{5,11}/gi) || [];
-                // Filtere bekannte Nicht-Seriennummern
-                const excluded = ['TGERRA', 'TERRA', 'Server', 'Storage', 'Gesamt', 'Monate', 'Monat', 'ITRIS', 'Preis', 'HYPERLINK'];
-                for (const sn of snPattern1) {
-                    if (!excluded.some(ex => sn.toUpperCase().includes(ex.toUpperCase()))) {
-                        // Pruefe ob danach 3 Preise kommen (dann ist es wahrscheinlich eine S/N)
-                        const idx = body.indexOf(sn);
-                        if (idx !== -1) {
-                            const after = body.substring(idx, idx + 200);
-                            const prices = after.match(/\d{2,4}[,.]?\s*€/g);
-                            if (prices && prices.length >= 3) {
+                // Suche nach "S/N:" oder "S/N :" Pattern
+                const snRegex = /S\/N[:\s]+([A-Z0-9]+)/gi;
+                let match;
+                while ((match = snRegex.exec(body)) !== null) {
+                    let sn = match[1];
+                    // Entferne trailing Nullen (RTF-Artefakte)
+                    sn = sn.replace(/0+$/, '');
+                    // Mindestens 6 Zeichen, hoechstens 12
+                    if (sn.length >= 6 && sn.length <= 12) {
+                        // Filtere ungueltige Matches
+                        const invalid = ['x9xNBD', 'x24x4', 'Konfig', 'bermit', 'TS7420', 'TS5420', 'TS7410'];
+                        if (!invalid.some(inv => sn.toUpperCase().includes(inv.toUpperCase()))) {
+                            if (!snMatches.includes(sn)) {
                                 snMatches.push(sn);
                             }
                         }
                     }
                 }
 
-                // Methode B: Suche nach "S/N:" Pattern in der Anfrage
-                const snPattern2 = body.match(/S\/N[:\s]+([A-Z0-9]{6,12})/gi) || [];
-                for (const match of snPattern2) {
-                    const snMatch = match.match(/([A-Z0-9]{6,12})$/i);
-                    if (snMatch && !snMatches.includes(snMatch[1])) {
-                        snMatches.push(snMatch[1]);
-                    }
+                console.log('Gefundene Seriennummern (via S/N:):', snMatches);
+
+                // Finde Produktinfo und Preise im gesamten Text
+                // Suche nach Zeilen mit 3 Preisen (7x24x4, 5x9x4, 5x9xNBD)
+                const priceLineRegex = /(\d{2,4})\s*€[^€]*(\d{2,4})\s*€[^€]*(\d{2,4})\s*€/g;
+                let priceMatch = priceLineRegex.exec(body);
+                let prices = null;
+                if (priceMatch) {
+                    prices = {
+                        price7x24x4: parseInt(priceMatch[1]),
+                        price5x9x4: parseInt(priceMatch[2]),
+                        price5x9xNBD: parseInt(priceMatch[3])
+                    };
+                    console.log('Gefundene Preise:', prices);
                 }
 
-                console.log('Gefundene Seriennummern:', snMatches);
+                // Finde Produkttyp (z.B. "TS7420 G3" oder "TERRA SERVER")
+                let productName = 'Unbekannt';
+                const typMatch = body.match(/(?:TGERRA|TERRA)\s*(?:SERVER|STORAGE)?[^€\n]{0,30}(TS\d{4})\s*(G\d)?/i);
+                if (typMatch) {
+                    productName = (typMatch[1] + (typMatch[2] ? ' ' + typMatch[2] : '')).trim();
+                } else {
+                    // Alternatives Pattern
+                    const altMatch = body.match(/(TS\d{4})\s*(G\d)?/i);
+                    if (altMatch) {
+                        productName = (altMatch[1] + (altMatch[2] ? ' ' + altMatch[2] : '')).trim();
+                    }
+                }
+                console.log('Gefundener Produktname:', productName);
 
+                // Erstelle Produkte fuer jede gefundene Seriennummer
                 for (const sn of snMatches) {
-                    // Finde die Position der Seriennummer im Text
-                    const snIndex = body.indexOf(sn);
-                    if (snIndex === -1) continue;
+                    if (prices && prices.price7x24x4 >= 10 && prices.price7x24x4 <= 10000) {
+                        console.log('PRODUKT GEFUNDEN: S/N=' + sn + ', Name=' + productName + ', Preise=' + prices.price7x24x4 + '/' + prices.price5x9x4 + '/' + prices.price5x9xNBD);
 
-                    // Schritt 2: Extrahiere den Text nach der Seriennummer (max 200 Zeichen)
-                    const afterSN = body.substring(snIndex + sn.length, snIndex + sn.length + 200);
-                    console.log('Text nach S/N ' + sn + ':', afterSN.substring(0, 100));
-
-                    // Schritt 3: Finde die 3 Preise nach der Seriennummer
-                    const priceMatches = afterSN.match(/(\d{2,4})[,.]?\s*€/g);
-                    console.log('Gefundene Preise:', priceMatches);
-
-                    if (priceMatches && priceMatches.length >= 3) {
-                        const extractPrice = (s) => {
-                            const m = s.match(/(\d+)/);
-                            return m ? parseInt(m[1]) : 0;
-                        };
-
-                        const price7x24x4 = extractPrice(priceMatches[0]);
-                        const price5x9x4 = extractPrice(priceMatches[1]);
-                        const price5x9xNBD = extractPrice(priceMatches[2]);
-
-                        // Preise sollten plausibel sein
-                        if (price7x24x4 >= 10 && price7x24x4 <= 10000) {
-                            // Schritt 4: Finde Produktname vor der Seriennummer
-                            const beforeSN = body.substring(Math.max(0, snIndex - 300), snIndex);
-
-                            // Suche nach Typ (z.B. "TS7420 G3")
-                            const typMatch = beforeSN.match(/([T][S]\d{4}\s*[A-Z0-9]*)/i);
-                            const typ = typMatch ? typMatch[1].replace(/0+/g, ' ').trim() : '';
-
-                            // Suche nach Bezeichnung
-                            const bezMatch = beforeSN.match(/(TGERRA|TERRA)[^€]{5,80}/i);
-                            const bezeichnung = bezMatch ? bezMatch[0].replace(/0+/g, ' ').trim() : '';
-
-                            const productName = typ || bezeichnung || 'Unbekannt';
-
-                            console.log('PRODUKT GEFUNDEN: S/N=' + sn + ', Name=' + productName + ', Preise=' + price7x24x4 + '/' + price5x9x4 + '/' + price5x9xNBD);
-
-                            // Erstelle DREI Produkte - eines pro SLA
-                            products.push({
-                                name: productName,
-                                typ: typ,
-                                serialNumber: sn,
-                                sla: '7x24x4h',
-                                price: price7x24x4
-                            });
-                            products.push({
-                                name: productName,
-                                typ: typ,
-                                serialNumber: sn,
-                                sla: '5x9x4h',
-                                price: price5x9x4
-                            });
-                            products.push({
-                                name: productName,
-                                typ: typ,
-                                serialNumber: sn,
-                                sla: '5x9xNBD',
-                                price: price5x9xNBD
-                            });
-                        }
+                        // Erstelle DREI Produkte - eines pro SLA
+                        products.push({
+                            name: productName,
+                            typ: productName,
+                            serialNumber: sn,
+                            sla: '7x24x4h',
+                            price: prices.price7x24x4
+                        });
+                        products.push({
+                            name: productName,
+                            typ: productName,
+                            serialNumber: sn,
+                            sla: '5x9x4h',
+                            price: prices.price5x9x4
+                        });
+                        products.push({
+                            name: productName,
+                            typ: productName,
+                            serialNumber: sn,
+                            sla: '5x9xNBD',
+                            price: prices.price5x9xNBD
+                        });
                     }
                 }
             }
