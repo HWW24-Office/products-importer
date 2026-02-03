@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.9.3
+// @version      1.10.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -204,6 +204,7 @@
                 <div id="importer-tabs">
                     <button class="importer-tab active" data-panel="axians">Axians List</button>
                     <button class="importer-tab" data-panel="axians-email">Axians Email</button>
+                    <button class="importer-tab" data-panel="itris-email">ITRIS Email</button>
                     <button class="importer-tab" data-panel="technogroup">Technogroup List</button>
                     <button class="importer-tab" data-panel="technogroup-pdf">Technogroup PDF</button>
                     <button class="importer-tab" data-panel="parkplace">Parkplace Excel</button>
@@ -216,6 +217,8 @@
                     <div class="importer-panel active" id="panel-axians"></div>
                     <!-- Axians Email Panel -->
                     <div class="importer-panel" id="panel-axians-email"></div>
+                    <!-- ITRIS Email Panel -->
+                    <div class="importer-panel" id="panel-itris-email"></div>
                     <!-- Technogroup Panel -->
                     <div class="importer-panel" id="panel-technogroup"></div>
                     <!-- Technogroup PDF Panel -->
@@ -1416,6 +1419,454 @@
                 ].join(';'));
             });
             downloadCSV(csvRows, 'crm_import_axians_email.csv');
+        });
+    }
+
+    // ============================================
+    // ITRIS EMAIL IMPORTER
+    // ============================================
+    function initItrisEmail() {
+        const panel = document.getElementById('panel-itris-email');
+        panel.innerHTML = `
+            <h3>ITRIS Email Importer</h3>
+            <p style="color:#666;margin-bottom:15px;">Liest Angebote direkt aus ITRIS E-Mails (.msg Dateien)</p>
+            <div class="imp-row-grid">
+                <div class="imp-form-group">
+                    <label>Email (.msg Datei):</label>
+                    <input type="file" id="itris-email-file" accept=".msg" class="imp-hidden">
+                    <div class="imp-drop-zone" id="itris-email-dropzone">MSG-Datei hierher ziehen oder klicken</div>
+                    <button id="itris-email-process">Email verarbeiten</button>
+                </div>
+                <div>
+                    <div class="imp-form-group">
+                        <label>SLA auswählen:</label>
+                        <select id="itris-email-sla">
+                            <option value="7x24x4">7x24x4h</option>
+                            <option value="5x9x4">5x9x4h</option>
+                            <option value="5x9xNBD" selected>5x9xNBD</option>
+                        </select>
+                    </div>
+                    <div class="imp-form-group">
+                        <label>Laufzeit (Monate):</label>
+                        <input type="number" id="itris-email-duration" value="12">
+                    </div>
+                    <div class="imp-form-group">
+                        <label>Preis-Multiplikator:</label>
+                        <input type="number" id="itris-email-multiplier" value="1.84" step="0.01">
+                    </div>
+                    <div class="imp-form-group">
+                        <label>Land:</label>
+                        <input type="text" id="itris-email-country" value="Deutschland" placeholder="z.B. Deutschland, Österreich...">
+                    </div>
+                </div>
+            </div>
+            <div id="itris-email-info" style="margin:15px 0;padding:10px;background:#f5f5f5;border-radius:4px;display:none;">
+                <strong>Email-Info:</strong>
+                <div id="itris-email-subject"></div>
+                <div id="itris-email-angebot"></div>
+                <div id="itris-email-standort"></div>
+            </div>
+            <div id="itris-email-parsed" style="margin:15px 0;display:none;">
+                <h4>Gefundene Produkte:</h4>
+                <div id="itris-email-products-list"></div>
+                <button id="itris-email-add-all" style="margin-top:10px;">Ausgewählte zum Warenkorb hinzufügen</button>
+            </div>
+            <div class="imp-form-group">
+                <button id="itris-email-clear" class="imp-btn-danger">Warenkorb leeren</button>
+            </div>
+            <h4>Warenkorb</h4>
+            <div style="overflow-x:auto;">
+                <table class="imp-table" id="itris-email-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Active</th>
+                            <th>Manufacturer</th>
+                            <th>Category</th>
+                            <th>Vendor</th>
+                            <th>Unit Price</th>
+                            <th>Stock</th>
+                            <th>Handler</th>
+                            <th>Description</th>
+                            <th>Purchase Cost</th>
+                            <th>SLA</th>
+                            <th>Country</th>
+                            <th>Duration</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <button id="itris-email-download">CSV speichern</button>
+        `;
+
+        let parsedProducts = [];
+        let cart = [];
+        let parsedStandort = '';
+        let parsedAngebotsnummer = '';
+
+        const fileInput = document.getElementById('itris-email-file');
+        const dropZone = document.getElementById('itris-email-dropzone');
+        setupDropZone(dropZone, fileInput);
+
+        // ITRIS E-Mail-Text parsen
+        function parseItrisEmail(body, subject) {
+            const products = [];
+
+            // Angebotsnummer extrahieren (z.B. "Angebotsnummer: W-77111904")
+            const angebotMatch = body.match(/Angebotsnummer:\s*([A-Z0-9\-]+)/i);
+            const angebotsnummer = angebotMatch ? angebotMatch[1].trim() : '';
+
+            // Standort extrahieren (aus der Tabelle: "Standort: Mainz")
+            const standortMatch = body.match(/Standort:\s*([^\n\r\t]+)/i);
+            let standort = standortMatch ? standortMatch[1].trim() : '';
+            // Bereinigen (stoppe bei Tab oder mehreren Leerzeichen)
+            standort = standort.split(/\t|\s{2,}/)[0].trim();
+
+            // ITRIS Format: Daten sind auf separaten Zeilen
+            // Zeilen aufteilen (behalte \r\n als Trenner)
+            const lines = body.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+
+            // Suche nach Seriennummern (alphanumerisch, 6+ Zeichen, allein auf einer Zeile oder am Anfang)
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+
+                // Seriennummer-Kandidat (alphanumerisch, 6-12 Zeichen, keine Preise)
+                if (/^[A-Z0-9]{6,12}$/.test(line) && !line.includes('€')) {
+                    const serialNumber = line;
+
+                    // Suche die 3 Preise nach der Seriennummer
+                    const prices = [];
+                    for (let j = i + 1; j < Math.min(i + 10, lines.length); j++) {
+                        const priceLine = lines[j];
+                        const priceMatch = priceLine.match(/^([\d.,]+)\s*€$/);
+                        if (priceMatch) {
+                            prices.push(parseFloat(priceMatch[1].replace('.', '').replace(',', '.')));
+                        }
+                        if (prices.length >= 3) break;
+                        // Stoppe wenn Gesamt erreicht
+                        if (priceLine.startsWith('Gesamt')) break;
+                    }
+
+                    // Suche Produktinfo vor der Seriennummer
+                    let productName = '';
+                    let typ = '';
+                    let bezeichnung = '';
+
+                    for (let j = i - 1; j >= Math.max(0, i - 10); j--) {
+                        const prevLine = lines[j];
+
+                        // Typ/Modell (z.B. "TS7420 G3")
+                        if (/^[A-Z]{2}[A-Z0-9]+(\s+[A-Z0-9]+)?$/.test(prevLine) && !typ) {
+                            typ = prevLine;
+                        }
+                        // Bezeichnung (laenger, enthaelt Beschreibung)
+                        if (prevLine.length > 20 && !prevLine.includes('€') && !bezeichnung) {
+                            bezeichnung = prevLine.split(/Kaufpreis/i)[0].trim();
+                        }
+                        // Stoppe bei Header-Zeilen
+                        if (prevLine.includes('5x9xNBD') || prevLine.includes('7x24x4h')) break;
+                    }
+
+                    if (prices.length >= 3 && (typ || bezeichnung)) {
+                        productName = typ ? (bezeichnung ? typ + ' - ' + bezeichnung : typ) : bezeichnung;
+
+                        products.push({
+                            name: productName,
+                            typ: typ,
+                            serialNumber: serialNumber,
+                            price7x24x4: prices[0],
+                            price5x9x4: prices[1],
+                            price5x9xNBD: prices[2]
+                        });
+                    }
+                }
+            }
+
+            // Alternative: Suche im gesamten Body nach S/N Pattern gefolgt von Preisen
+            if (products.length === 0) {
+                // Pattern: S/N gefolgt von 3 Preisen (mit beliebigem Whitespace)
+                const regex = /([A-Z0-9]{6,12})\s*\r?\n\s*([\d.,]+)\s*€\s*\r?\n\s*([\d.,]+)\s*€\s*\r?\n\s*([\d.,]+)\s*€/gi;
+                let match;
+                while ((match = regex.exec(body)) !== null) {
+                    const serialNumber = match[1];
+
+                    // Ueberspringe wenn S/N-Kandidat ein bekanntes Keyword ist
+                    if (/^(Gesamt|Monate|Monat|Total|EUR)$/i.test(serialNumber)) {
+                        continue;
+                    }
+
+                    const price1 = parseFloat(match[2].replace('.', '').replace(',', '.'));
+                    const price2 = parseFloat(match[3].replace('.', '').replace(',', '.'));
+                    const price3 = parseFloat(match[4].replace('.', '').replace(',', '.'));
+
+                    // Finde Produktname vor der S/N
+                    const beforeMatch = body.substring(0, match.index);
+                    const beforeLines = beforeMatch.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+
+                    let productName = '';
+                    let typ = '';
+                    for (let j = beforeLines.length - 1; j >= Math.max(0, beforeLines.length - 10); j--) {
+                        const prevLine = beforeLines[j];
+                        // Stoppe bei Gesamt-Zeilen
+                        if (/^Gesamt/i.test(prevLine)) break;
+
+                        if (/^[A-Z]{2}[A-Z0-9]+(\s+[A-Z0-9]+)?$/.test(prevLine) && !typ) {
+                            typ = prevLine;
+                        }
+                        if (prevLine.length > 15 && !prevLine.includes('€') && !productName && !prevLine.match(/^[0-9]+$/)) {
+                            productName = prevLine.split(/Kaufpreis/i)[0].trim();
+                        }
+                        if (typ && productName) break;
+                    }
+
+                    products.push({
+                        name: typ ? (productName ? typ + ' - ' + productName : typ) : (productName || 'Unbekannt'),
+                        typ: typ,
+                        serialNumber: serialNumber,
+                        price7x24x4: price1,
+                        price5x9x4: price2,
+                        price5x9xNBD: price3
+                    });
+                }
+            }
+
+            console.log('ITRIS gefundene Produkte:', products);
+            return { products, angebotsnummer, standort };
+        }
+
+        // Hersteller aus Produktname/Typ extrahieren
+        function extractManufacturer(productName) {
+            const manufacturers = {
+                'TERRA': ['TERRA', 'TGERRA', 'TS7', 'TS5'],
+                'Fujitsu': ['Fujitsu', 'Primergy', 'Eternus', 'PY '],
+                'HPE': ['HP ', 'HPE', 'ProLiant', 'Proliant', '3PAR', 'Nimble', 'DL3', 'DL5', 'ML3'],
+                'Dell': ['Dell', 'PowerEdge', 'PowerVault', 'EqualLogic', 'Compellent', 'R6', 'R7', 'T6'],
+                'NetApp': ['NetApp', 'FAS', 'AFF'],
+                'IBM': ['IBM', 'System x', 'Storwize', 'FlashSystem'],
+                'Lenovo': ['Lenovo', 'ThinkSystem', 'ThinkServer'],
+                'Cisco': ['Cisco', 'UCS'],
+                'Supermicro': ['Supermicro', 'Super', 'SMC']
+            };
+
+            for (const [mfr, keywords] of Object.entries(manufacturers)) {
+                for (const kw of keywords) {
+                    if (productName.toUpperCase().includes(kw.toUpperCase())) {
+                        return mfr;
+                    }
+                }
+            }
+            return 'Sonstiges';
+        }
+
+        document.getElementById('itris-email-process').addEventListener('click', async () => {
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Bitte eine .msg Datei auswählen.');
+                return;
+            }
+
+            try {
+                const emailData = await readMsgFile(file);
+                const { products, angebotsnummer, standort } = parseItrisEmail(emailData.body, emailData.subject);
+
+                parsedStandort = standort;
+                parsedAngebotsnummer = angebotsnummer;
+
+                // Info anzeigen
+                document.getElementById('itris-email-info').style.display = 'block';
+                document.getElementById('itris-email-subject').textContent = 'Betreff: ' + emailData.subject;
+                document.getElementById('itris-email-angebot').textContent = 'Angebotsnummer: ' + (angebotsnummer || 'Nicht gefunden');
+                document.getElementById('itris-email-standort').textContent = 'Standort: ' + (standort || 'Nicht gefunden');
+
+                // Standort in Land-Feld eintragen
+                if (standort) {
+                    document.getElementById('itris-email-country').value = standort;
+                }
+
+                if (products.length === 0) {
+                    alert('Keine Produkte in der E-Mail gefunden. Bitte prüfen Sie, ob es sich um eine ITRIS-Angebots-E-Mail handelt.');
+                    document.getElementById('itris-email-parsed').style.display = 'none';
+                    return;
+                }
+
+                parsedProducts = products;
+
+                // Gefundene Produkte anzeigen mit allen SLA-Preisen
+                const listDiv = document.getElementById('itris-email-products-list');
+                listDiv.innerHTML = products.map((p, idx) => `
+                    <div style="padding:8px;margin:5px 0;background:#fff;border:1px solid #ddd;border-radius:4px;">
+                        <label style="display:flex;align-items:center;gap:10px;">
+                            <input type="checkbox" class="itris-email-product-check" data-idx="${idx}" checked>
+                            <span>
+                                <strong>${p.name}</strong><br>
+                                <small>S/N: ${p.serialNumber} | 7x24x4: ${p.price7x24x4.toFixed(2)}€ | 5x9x4: ${p.price5x9x4.toFixed(2)}€ | 5x9xNBD: ${p.price5x9xNBD.toFixed(2)}€</small>
+                            </span>
+                        </label>
+                    </div>
+                `).join('');
+
+                document.getElementById('itris-email-parsed').style.display = 'block';
+                dropZone.textContent = file.name;
+
+            } catch (error) {
+                console.error('Fehler beim Verarbeiten der E-Mail:', error);
+                alert('Fehler beim Verarbeiten der E-Mail: ' + error.message);
+            }
+        });
+
+        document.getElementById('itris-email-add-all').addEventListener('click', () => {
+            const checkboxes = document.querySelectorAll('.itris-email-product-check:checked');
+            const selectedSla = document.getElementById('itris-email-sla').value;
+            const duration = parseInt(document.getElementById('itris-email-duration').value) || 12;
+            const multiplier = parseFloat(document.getElementById('itris-email-multiplier').value) || 1.84;
+            const country = document.getElementById('itris-email-country').value.trim() || 'Deutschland';
+
+            checkboxes.forEach(cb => {
+                const idx = parseInt(cb.dataset.idx);
+                const product = parsedProducts[idx];
+
+                // Preis basierend auf ausgewähltem SLA
+                let pricePerMonth;
+                switch (selectedSla) {
+                    case '7x24x4': pricePerMonth = product.price7x24x4; break;
+                    case '5x9x4': pricePerMonth = product.price5x9x4; break;
+                    case '5x9xNBD': pricePerMonth = product.price5x9xNBD; break;
+                    default: pricePerMonth = product.price5x9xNBD;
+                }
+
+                const unitPrice = (pricePerMonth * multiplier * duration).toFixed(1);
+                const purchaseCost = (pricePerMonth * duration).toFixed(2);
+                const manufacturer = extractManufacturer(product.name);
+
+                // Duplikat-Check
+                const isDuplicate = cart.some(item =>
+                    item.name === product.name && item.sla === selectedSla &&
+                    item.duration === duration && item.country === country
+                );
+
+                if (!isDuplicate) {
+                    const description = `S/N: ${product.serialNumber}\nService Start: tba\nService Ende: tba`;
+
+                    cart.push({
+                        name: product.name,
+                        active: 1,
+                        manufacturer: manufacturer,
+                        category: 'Wartung',
+                        vendor: 'ITRIS GmbH',
+                        unitPrice,
+                        qtyInStock: 999,
+                        handler: 'Team Wartung',
+                        description: description,
+                        purchaseCost,
+                        sla: selectedSla,
+                        country,
+                        duration,
+                        listPrice: 1,
+                        pricePerMonth: pricePerMonth
+                    });
+                }
+            });
+
+            updateTable();
+        });
+
+        function updateTable() {
+            const tbody = document.querySelector('#itris-email-table tbody');
+            tbody.innerHTML = '';
+            cart.forEach((item, index) => {
+                const row = document.createElement('tr');
+                row.dataset.index = index;
+                row.innerHTML = `
+                    <td contenteditable="true" class="editable" data-field="name">${item.name}</td>
+                    <td data-field="active">${item.active}</td>
+                    <td contenteditable="true" class="editable" data-field="manufacturer">${item.manufacturer}</td>
+                    <td data-field="category">${item.category}</td>
+                    <td data-field="vendor">${item.vendor}</td>
+                    <td contenteditable="true" class="editable" data-field="unitPrice">${item.unitPrice}</td>
+                    <td data-field="qtyInStock">${item.qtyInStock}</td>
+                    <td data-field="handler">${item.handler}</td>
+                    <td contenteditable="true" class="editable" data-field="description">${item.description.replace(/\n/g, '<br>')}</td>
+                    <td contenteditable="true" class="editable" data-field="purchaseCost">${item.purchaseCost}</td>
+                    <td contenteditable="true" class="editable" data-field="sla">${item.sla}</td>
+                    <td contenteditable="true" class="editable" data-field="country">${item.country}</td>
+                    <td contenteditable="true" class="editable" data-field="duration">${item.duration}</td>
+                    <td><button class="imp-btn-danger itris-email-remove" data-index="${index}">X</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+            window.itrisEmailCart = cart;
+
+            tbody.querySelectorAll('.itris-email-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    cart.splice(idx, 1);
+                    updateTable();
+                });
+            });
+        }
+
+        function getTableData() {
+            const rows = document.querySelectorAll('#itris-email-table tbody tr');
+            const data = [];
+            rows.forEach(row => {
+                const item = {
+                    name: row.querySelector('[data-field="name"]')?.textContent || '',
+                    active: row.querySelector('[data-field="active"]')?.textContent || '1',
+                    manufacturer: row.querySelector('[data-field="manufacturer"]')?.textContent || '',
+                    category: row.querySelector('[data-field="category"]')?.textContent || 'Wartung',
+                    vendor: row.querySelector('[data-field="vendor"]')?.textContent || '',
+                    unitPrice: row.querySelector('[data-field="unitPrice"]')?.textContent || '0',
+                    qtyInStock: row.querySelector('[data-field="qtyInStock"]')?.textContent || '999',
+                    handler: row.querySelector('[data-field="handler"]')?.textContent || '',
+                    description: (row.querySelector('[data-field="description"]')?.innerHTML || '').replace(/<br\s*\/?>/gi, '\n'),
+                    purchaseCost: row.querySelector('[data-field="purchaseCost"]')?.textContent || '0',
+                    sla: row.querySelector('[data-field="sla"]')?.textContent || '',
+                    country: row.querySelector('[data-field="country"]')?.textContent || '',
+                    duration: row.querySelector('[data-field="duration"]')?.textContent || '12',
+                    listPrice: 1
+                };
+                data.push(item);
+            });
+            return data;
+        }
+
+        function recalculatePrices() {
+            const duration = parseInt(document.getElementById('itris-email-duration').value) || 12;
+            const multiplier = parseFloat(document.getElementById('itris-email-multiplier').value) || 1.84;
+
+            cart.forEach(item => {
+                if (item.pricePerMonth) {
+                    item.unitPrice = (item.pricePerMonth * multiplier * duration).toFixed(1);
+                    item.purchaseCost = (item.pricePerMonth * duration).toFixed(2);
+                    item.duration = duration;
+                }
+            });
+            updateTable();
+        }
+
+        document.getElementById('itris-email-duration').addEventListener('change', recalculatePrices);
+        document.getElementById('itris-email-multiplier').addEventListener('change', recalculatePrices);
+
+        document.getElementById('itris-email-clear').addEventListener('click', () => {
+            cart = [];
+            updateTable();
+        });
+
+        document.getElementById('itris-email-download').addEventListener('click', () => {
+            const tableData = getTableData();
+            const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months", "Listenpreis"];
+            const csvRows = [headers.join(';')];
+            tableData.forEach(item => {
+                csvRows.push([
+                    item.name, item.active, item.manufacturer, item.category, item.vendor,
+                    item.unitPrice, item.qtyInStock, item.handler,
+                    `"${item.description}"`,
+                    item.purchaseCost, item.sla, item.country, item.duration, item.listPrice
+                ].join(';'));
+            });
+            downloadCSV(csvRows, 'crm_import_itris_email.csv');
         });
     }
 
@@ -3621,6 +4072,7 @@
         addFloatingButton();
         initAxians();
         initAxiansEmail();
+        initItrisEmail();
         initTechnogroup();
         initTechnogroupPDF();
         initParkplace();
