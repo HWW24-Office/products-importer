@@ -583,10 +583,10 @@
         }
 
         // LZFu Dekompression (MS-OXRTFCP Spezifikation)
-        // Prebuffer: Standard-RTF-Header der im Dictionary vorinitialisiert ist
+        // Exaktes Prebuffer aus der Microsoft Spezifikation (207 Bytes)
         const prebuf = "{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\fswiss \\fmodern \\fscript \\fdecor MS Sans SerifSymbolArialTimes New RomanCourierBook Antiqua;}{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\f0\\fs20\\b\\i\\u\\tab\\tx";
         const dict = new Uint8Array(4096);
-        for (let i = 0; i < prebuf.length && i < 207; i++) {
+        for (let i = 0; i < prebuf.length; i++) {
             dict[i] = prebuf.charCodeAt(i);
         }
 
@@ -598,21 +598,13 @@
             while (inPos < compressedData.length && output.length < rawSize) {
                 const flags = compressedData[inPos++];
                 for (let i = 0; i < 8 && inPos < compressedData.length && output.length < rawSize; i++) {
-                    const isRef = (flags & (1 << i)) === 0; // Bit=0 bedeutet Referenz!
-
-                    if (isRef) {
-                        // Dictionary-Referenz (2 Bytes)
+                    if (flags & (1 << i)) {
+                        // Bit=1: Dictionary-Referenz (2 Bytes)
                         if (inPos + 1 >= compressedData.length) break;
                         const ref1 = compressedData[inPos++];
                         const ref2 = compressedData[inPos++];
                         const offset = (ref1 << 4) | (ref2 >> 4);
                         const length = (ref2 & 0x0F) + 2;
-
-                        // Pruefe auf End-Marker (offset zeigt auf dictWritePos)
-                        if (offset === dictWritePos) {
-                            console.log('RTF End-Marker erreicht bei Position', inPos);
-                            return new TextDecoder('windows-1252').decode(new Uint8Array(output));
-                        }
 
                         for (let j = 0; j < length && output.length < rawSize; j++) {
                             const byte = dict[(offset + j) % 4096];
@@ -621,7 +613,7 @@
                             dictWritePos = (dictWritePos + 1) % 4096;
                         }
                     } else {
-                        // Literal Byte (Bit=1)
+                        // Bit=0: Literal Byte
                         const byte = compressedData[inPos++];
                         output.push(byte);
                         dict[dictWritePos] = byte;
