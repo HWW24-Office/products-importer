@@ -754,10 +754,26 @@
                     };
 
                     // Wenn HTML vorhanden, versuche Text zu extrahieren
-                    if (!result.body && result.bodyHTML) {
+                    if ((!result.body || result.body.length < 50) && result.bodyHTML) {
+                        // Bessere HTML-zu-Text Konvertierung die Struktur erhaelt
+                        let htmlText = result.bodyHTML;
+                        // Ersetze Block-Elemente durch Zeilenumbrueche
+                        htmlText = htmlText.replace(/<br\s*\/?>/gi, '\n');
+                        htmlText = htmlText.replace(/<\/tr>/gi, '\n');
+                        htmlText = htmlText.replace(/<\/p>/gi, '\n');
+                        htmlText = htmlText.replace(/<\/div>/gi, '\n');
+                        htmlText = htmlText.replace(/<\/li>/gi, '\n');
+                        // Ersetze Tabellenzellen durch Tabs
+                        htmlText = htmlText.replace(/<\/td>/gi, '\t');
+                        htmlText = htmlText.replace(/<\/th>/gi, '\t');
+                        // Entferne alle verbleibenden HTML-Tags
                         const temp = document.createElement('div');
-                        temp.innerHTML = result.bodyHTML;
-                        result.body = temp.textContent || temp.innerText || '';
+                        temp.innerHTML = htmlText;
+                        result.body = (temp.textContent || temp.innerText || '').trim();
+                        // Bereinige mehrfache Leerzeilen und Tabs
+                        result.body = result.body.replace(/\t+/g, '\t');
+                        result.body = result.body.replace(/\n\s*\n/g, '\n');
+                        console.log('HTML zu Text konvertiert, Laenge:', result.body.length);
                     }
 
                     // Finale Sicherheitspruefung: result.body MUSS ein String sein
@@ -1722,12 +1738,30 @@
         setupDropZone(dropZone, fileInput);
 
         // ITRIS E-Mail-Text parsen
-        function parseItrisEmail(body, subject) {
+        function parseItrisEmail(body, subject, bodyHTML = '') {
             const products = [];
 
             // Sicherstellen dass body ein String ist
             if (typeof body !== 'string') {
                 body = body ? String(body) : '';
+            }
+
+            // Wenn body sehr kurz ist, versuche HTML direkt zu parsen
+            if (body.length < 100 && bodyHTML && bodyHTML.length > 100) {
+                console.log('Body zu kurz, parse HTML direkt...');
+                // HTML zu strukturiertem Text konvertieren
+                let htmlText = bodyHTML;
+                htmlText = htmlText.replace(/<br\s*\/?>/gi, '\n');
+                htmlText = htmlText.replace(/<\/tr>/gi, '\n');
+                htmlText = htmlText.replace(/<\/p>/gi, '\n');
+                htmlText = htmlText.replace(/<\/div>/gi, '\n');
+                htmlText = htmlText.replace(/<\/td>/gi, '\t');
+                htmlText = htmlText.replace(/<\/th>/gi, '\t');
+                const temp = document.createElement('div');
+                temp.innerHTML = htmlText;
+                body = (temp.textContent || temp.innerText || '').trim();
+                body = body.replace(/\t+/g, '\t').replace(/\n\s*\n/g, '\n');
+                console.log('HTML konvertiert, neue Body-Laenge:', body.length);
             }
 
             // Angebotsnummer extrahieren (z.B. "Angebotsnummer: W-77111904")
@@ -1848,6 +1882,54 @@
                 }
             }
 
+            // Dritter Fallback: Tab-getrennte Zeilen (aus HTML-Tabellen)
+            // Format: Typ/Name \t Seriennummer \t Preis1 \t Preis2 \t Preis3
+            if (products.length === 0) {
+                console.log('Versuche Tab-getrenntes Format zu parsen...');
+                const lines = body.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+                for (const line of lines) {
+                    // Zeile mit Tabs splitten
+                    const parts = line.split('\t').map(p => p.trim()).filter(p => p);
+                    if (parts.length >= 4) {
+                        // Suche nach Preisen im Euro-Format
+                        const priceIndices = [];
+                        const prices = [];
+                        for (let i = 0; i < parts.length; i++) {
+                            const priceMatch = parts[i].match(/^([\d.,]+)\s*€?$/);
+                            if (priceMatch) {
+                                priceIndices.push(i);
+                                prices.push(parseFloat(priceMatch[1].replace('.', '').replace(',', '.')));
+                            }
+                        }
+
+                        if (prices.length >= 3) {
+                            // Suche nach Seriennummer (alphanumerisch, 6-12 Zeichen)
+                            let serialNumber = '';
+                            let productName = '';
+                            for (let i = 0; i < parts.length; i++) {
+                                if (priceIndices.includes(i)) continue;
+                                if (/^[A-Z0-9]{6,12}$/i.test(parts[i]) && !serialNumber) {
+                                    serialNumber = parts[i].toUpperCase();
+                                } else if (parts[i].length > 3 && !productName) {
+                                    productName = parts[i];
+                                }
+                            }
+
+                            if (serialNumber && productName) {
+                                products.push({
+                                    name: productName,
+                                    typ: productName.split(/\s+/)[0],
+                                    serialNumber: serialNumber,
+                                    price7x24x4: prices[0],
+                                    price5x9x4: prices[1],
+                                    price5x9xNBD: prices[2]
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             console.log('ITRIS gefundene Produkte:', products);
             return { products, angebotsnummer, standort };
         }
@@ -1897,7 +1979,7 @@
                 }
                 console.log('=========================');
 
-                const { products, angebotsnummer, standort } = parseItrisEmail(emailData.body, emailData.subject);
+                const { products, angebotsnummer, standort } = parseItrisEmail(emailData.body, emailData.subject, emailData.bodyHTML);
 
                 parsedStandort = standort;
                 parsedAngebotsnummer = angebotsnummer;
