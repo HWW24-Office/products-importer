@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.11.2
+// @version      1.11.3
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -1909,7 +1909,7 @@
     function initItrisEmail() {
         const panel = document.getElementById('panel-itris-email');
         panel.innerHTML = `
-            <h3>ITRIS Email Importer</h3>
+            <h3>ITRIS Email Importer <span style="font-size:12px;color:#888;font-weight:normal;">v1.11.3</span></h3>
             <p style="color:#666;margin-bottom:15px;">Liest Angebote direkt aus ITRIS E-Mails (.msg Dateien)</p>
             <div class="imp-row-grid">
                 <div class="imp-form-group">
@@ -2180,91 +2180,98 @@
                 }
             }
 
-            // Vierter Fallback: ITRIS RTF-Format - nur S/N: Pattern verwenden
+            // Vierter Fallback: ITRIS RTF-Format
             if (products.length === 0) {
-                console.log('Versuche ITRIS RTF-Format zu parsen...');
+                console.log('=== ITRIS RTF Parsing Start ===');
+                console.log('Body Laenge:', body.length);
+                console.log('Body Vorschau (erste 500 Zeichen):', body.substring(0, 500));
 
-                // Nur S/N: Pattern verwenden - das ist zuverlaessig
                 let snMatches = [];
 
-                // Suche nach "S/N:" oder "S/N :" Pattern
-                const snRegex = /S\/N[:\s]+([A-Z0-9]+)/gi;
-                let match;
-                while ((match = snRegex.exec(body)) !== null) {
-                    let sn = match[1];
-                    // Entferne trailing Nullen (RTF-Artefakte)
-                    sn = sn.replace(/0+$/, '');
-                    // Mindestens 6 Zeichen, hoechstens 12
-                    if (sn.length >= 6 && sn.length <= 12) {
-                        // Filtere ungueltige Matches
-                        const invalid = ['x9xNBD', 'x24x4', 'Konfig', 'bermit', 'TS7420', 'TS5420', 'TS7410'];
-                        if (!invalid.some(inv => sn.toUpperCase().includes(inv.toUpperCase()))) {
-                            if (!snMatches.includes(sn)) {
-                                snMatches.push(sn);
-                            }
+                // Methode 1: Suche nach "S/N" Pattern (verschiedene Schreibweisen)
+                const snPatterns = [
+                    /S\/N[:\s]+([A-Z0-9]+)/gi,
+                    /S\.N[:\s]+([A-Z0-9]+)/gi,
+                    /SN[:\s]+([A-Z0-9]+)/gi,
+                    /Seriennummer[:\s]+([A-Z0-9]+)/gi
+                ];
+                for (const regex of snPatterns) {
+                    let match;
+                    while ((match = regex.exec(body)) !== null) {
+                        let sn = match[1];
+                        // Entferne trailing Nullen (RTF-Artefakte)
+                        sn = sn.replace(/0{3,}$/, '');
+                        console.log('S/N Pattern Match:', match[0], '-> bereinigt:', sn);
+                        if (sn.length >= 6 && sn.length <= 12 && !snMatches.includes(sn)) {
+                            snMatches.push(sn);
                         }
                     }
                 }
+                console.log('Seriennummern nach Pattern-Suche:', snMatches);
 
-                console.log('Gefundene Seriennummern (via S/N:):', snMatches);
+                // Methode 2: Falls keine S/N gefunden, suche nach typischen S/N-Formaten
+                // (Buchstabe gefolgt von mind. 6 Ziffern, z.B. R6822929)
+                if (snMatches.length === 0) {
+                    const directSnRegex = /\b([A-Z]\d{6,10})\b/g;
+                    let match;
+                    while ((match = directSnRegex.exec(body)) !== null) {
+                        let sn = match[1].replace(/0{3,}$/, '');
+                        console.log('Direkte S/N gefunden:', sn);
+                        if (sn.length >= 7 && !snMatches.includes(sn)) {
+                            snMatches.push(sn);
+                        }
+                    }
+                }
+                console.log('Finale Seriennummern:', snMatches);
 
-                // Finde Produktinfo und Preise im gesamten Text
-                // Suche nach Zeilen mit 3 Preisen (7x24x4, 5x9x4, 5x9xNBD)
-                const priceLineRegex = /(\d{2,4})\s*€[^€]*(\d{2,4})\s*€[^€]*(\d{2,4})\s*€/g;
-                let priceMatch = priceLineRegex.exec(body);
+                // Finde Preise - suche nach Euro-Betraegen
+                const allPrices = body.match(/\b(\d{2,4})\s*€/g) || [];
+                console.log('Alle gefundenen Euro-Betraege:', allPrices);
+
+                // Suche nach 3 aufeinanderfolgenden Preisen (7x24x4, 5x9x4, 5x9xNBD)
                 let prices = null;
-                if (priceMatch) {
-                    prices = {
-                        price7x24x4: parseInt(priceMatch[1]),
-                        price5x9x4: parseInt(priceMatch[2]),
-                        price5x9xNBD: parseInt(priceMatch[3])
-                    };
-                    console.log('Gefundene Preise:', prices);
+                for (let i = 0; i < allPrices.length - 2; i++) {
+                    const p1 = parseInt(allPrices[i]);
+                    const p2 = parseInt(allPrices[i + 1]);
+                    const p3 = parseInt(allPrices[i + 2]);
+                    // Preise sollten absteigend sein (7x24x4 > 5x9x4 > 5x9xNBD)
+                    if (p1 > p2 && p2 > p3 && p1 >= 20 && p1 <= 5000 && p3 >= 10) {
+                        prices = { price7x24x4: p1, price5x9x4: p2, price5x9xNBD: p3 };
+                        console.log('Passende Preisreihe gefunden:', prices);
+                        break;
+                    }
                 }
 
-                // Finde Produkttyp (z.B. "TS7420 G3" oder "TERRA SERVER")
+                // Finde Produkttyp
                 let productName = 'Unbekannt';
-                const typMatch = body.match(/(?:TGERRA|TERRA)\s*(?:SERVER|STORAGE)?[^€\n]{0,30}(TS\d{4})\s*(G\d)?/i);
-                if (typMatch) {
-                    productName = (typMatch[1] + (typMatch[2] ? ' ' + typMatch[2] : '')).trim();
+                const typPatterns = [
+                    /(TS\d{4})\s*(G\d)?/i,
+                    /(TERRA\s*SERVER[^\n€]{0,50})/i,
+                    /(TERRA\s*STORAGE[^\n€]{0,50})/i
+                ];
+                for (const pattern of typPatterns) {
+                    const match = body.match(pattern);
+                    if (match) {
+                        productName = match[1].trim();
+                        if (match[2]) productName += ' ' + match[2];
+                        productName = productName.replace(/0{2,}/g, ' ').replace(/\s+/g, ' ').trim();
+                        console.log('Produktname gefunden:', productName);
+                        break;
+                    }
+                }
+
+                // Erstelle Produkte
+                if (snMatches.length > 0 && prices) {
+                    for (const sn of snMatches) {
+                        console.log('Erstelle Produkte fuer S/N:', sn);
+                        products.push({ name: productName, typ: productName, serialNumber: sn, sla: '7x24x4h', price: prices.price7x24x4 });
+                        products.push({ name: productName, typ: productName, serialNumber: sn, sla: '5x9x4h', price: prices.price5x9x4 });
+                        products.push({ name: productName, typ: productName, serialNumber: sn, sla: '5x9xNBD', price: prices.price5x9xNBD });
+                    }
                 } else {
-                    // Alternatives Pattern
-                    const altMatch = body.match(/(TS\d{4})\s*(G\d)?/i);
-                    if (altMatch) {
-                        productName = (altMatch[1] + (altMatch[2] ? ' ' + altMatch[2] : '')).trim();
-                    }
+                    console.log('Keine Produkte erstellt. snMatches:', snMatches.length, 'prices:', prices);
                 }
-                console.log('Gefundener Produktname:', productName);
-
-                // Erstelle Produkte fuer jede gefundene Seriennummer
-                for (const sn of snMatches) {
-                    if (prices && prices.price7x24x4 >= 10 && prices.price7x24x4 <= 10000) {
-                        console.log('PRODUKT GEFUNDEN: S/N=' + sn + ', Name=' + productName + ', Preise=' + prices.price7x24x4 + '/' + prices.price5x9x4 + '/' + prices.price5x9xNBD);
-
-                        // Erstelle DREI Produkte - eines pro SLA
-                        products.push({
-                            name: productName,
-                            typ: productName,
-                            serialNumber: sn,
-                            sla: '7x24x4h',
-                            price: prices.price7x24x4
-                        });
-                        products.push({
-                            name: productName,
-                            typ: productName,
-                            serialNumber: sn,
-                            sla: '5x9x4h',
-                            price: prices.price5x9x4
-                        });
-                        products.push({
-                            name: productName,
-                            typ: productName,
-                            serialNumber: sn,
-                            sla: '5x9xNBD',
-                            price: prices.price5x9xNBD
-                        });
-                    }
-                }
+                console.log('=== ITRIS RTF Parsing Ende ===');
             }
 
             console.log('ITRIS gefundene Produkte:', products);
