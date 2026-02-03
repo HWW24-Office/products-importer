@@ -87,9 +87,12 @@
         });
     }
 
+    const LOADER_VERSION = '1.2.0';
+
     // Hauptfunktion
     async function init() {
         try {
+            console.log('[VTiger Importer Loader] Version ' + LOADER_VERSION);
             console.log('[VTiger Importer] Lade Bibliotheken...');
 
             // 1. Externe Bibliotheken laden
