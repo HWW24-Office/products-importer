@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.11.0
+// @version      1.11.1
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -1920,12 +1920,7 @@
                 </div>
                 <div>
                     <div class="imp-form-group">
-                        <label>SLA auswählen:</label>
-                        <select id="itris-email-sla">
-                            <option value="7x24x4">7x24x4h</option>
-                            <option value="5x9x4">5x9x4h</option>
-                            <option value="5x9xNBD" selected>5x9xNBD</option>
-                        </select>
+                        <small style="color:#666;">Hinweis: Jedes Produkt wird pro SLA (7x24x4h, 5x9x4h, 5x9xNBD) einzeln angezeigt.</small>
                     </div>
                     <div class="imp-form-group">
                         <label>Laufzeit (Monate):</label>
@@ -2189,8 +2184,38 @@
             if (products.length === 0) {
                 console.log('Versuche ITRIS RTF-Format zu parsen (vereinfacht)...');
 
-                // Schritt 1: Finde alle Seriennummern (R + 7-9 Ziffern oder alphanumerisch 7-10 Zeichen)
-                const snMatches = body.match(/[R][0-9]{7,9}/gi) || [];
+                // Schritt 1: Finde alle Seriennummern
+                // Pattern 1: Alphanumerisch 6-12 Zeichen (beginnt mit Buchstabe)
+                // Pattern 2: Nach "S/N:" oder "S/N :" suchen
+                let snMatches = [];
+
+                // Methode A: Suche im Produktbereich nach alphanumerischen S/N
+                const snPattern1 = body.match(/[A-Z][A-Z0-9]{5,11}/gi) || [];
+                // Filtere bekannte Nicht-Seriennummern
+                const excluded = ['TGERRA', 'TERRA', 'Server', 'Storage', 'Gesamt', 'Monate', 'Monat', 'ITRIS', 'Preis', 'HYPERLINK'];
+                for (const sn of snPattern1) {
+                    if (!excluded.some(ex => sn.toUpperCase().includes(ex.toUpperCase()))) {
+                        // Pruefe ob danach 3 Preise kommen (dann ist es wahrscheinlich eine S/N)
+                        const idx = body.indexOf(sn);
+                        if (idx !== -1) {
+                            const after = body.substring(idx, idx + 200);
+                            const prices = after.match(/\d{2,4}[,.]?\s*€/g);
+                            if (prices && prices.length >= 3) {
+                                snMatches.push(sn);
+                            }
+                        }
+                    }
+                }
+
+                // Methode B: Suche nach "S/N:" Pattern in der Anfrage
+                const snPattern2 = body.match(/S\/N[:\s]+([A-Z0-9]{6,12})/gi) || [];
+                for (const match of snPattern2) {
+                    const snMatch = match.match(/([A-Z0-9]{6,12})$/i);
+                    if (snMatch && !snMatches.includes(snMatch[1])) {
+                        snMatches.push(snMatch[1]);
+                    }
+                }
+
                 console.log('Gefundene Seriennummern:', snMatches);
 
                 for (const sn of snMatches) {
@@ -2203,7 +2228,6 @@
                     console.log('Text nach S/N ' + sn + ':', afterSN.substring(0, 100));
 
                     // Schritt 3: Finde die 3 Preise nach der Seriennummer
-                    // Pattern: Zahl gefolgt von optional "," und optional "€"
                     const priceMatches = afterSN.match(/(\d{2,4})[,.]?\s*€/g);
                     console.log('Gefundene Preise:', priceMatches);
 
@@ -2213,12 +2237,12 @@
                             return m ? parseInt(m[1]) : 0;
                         };
 
-                        const price1 = extractPrice(priceMatches[0]);
-                        const price2 = extractPrice(priceMatches[1]);
-                        const price3 = extractPrice(priceMatches[2]);
+                        const price7x24x4 = extractPrice(priceMatches[0]);
+                        const price5x9x4 = extractPrice(priceMatches[1]);
+                        const price5x9xNBD = extractPrice(priceMatches[2]);
 
                         // Preise sollten plausibel sein
-                        if (price1 >= 10 && price1 <= 5000) {
+                        if (price7x24x4 >= 10 && price7x24x4 <= 10000) {
                             // Schritt 4: Finde Produktname vor der Seriennummer
                             const beforeSN = body.substring(Math.max(0, snIndex - 300), snIndex);
 
@@ -2232,15 +2256,29 @@
 
                             const productName = typ || bezeichnung || 'Unbekannt';
 
-                            console.log('PRODUKT GEFUNDEN: S/N=' + sn + ', Name=' + productName + ', Preise=' + price1 + '/' + price2 + '/' + price3);
+                            console.log('PRODUKT GEFUNDEN: S/N=' + sn + ', Name=' + productName + ', Preise=' + price7x24x4 + '/' + price5x9x4 + '/' + price5x9xNBD);
 
+                            // Erstelle DREI Produkte - eines pro SLA
                             products.push({
                                 name: productName,
                                 typ: typ,
                                 serialNumber: sn,
-                                price7x24x4: price1,
-                                price5x9x4: price2,
-                                price5x9xNBD: price3
+                                sla: '7x24x4h',
+                                price: price7x24x4
+                            });
+                            products.push({
+                                name: productName,
+                                typ: typ,
+                                serialNumber: sn,
+                                sla: '5x9x4h',
+                                price: price5x9x4
+                            });
+                            products.push({
+                                name: productName,
+                                typ: typ,
+                                serialNumber: sn,
+                                sla: '5x9xNBD',
+                                price: price5x9xNBD
                             });
                         }
                     }
@@ -2307,10 +2345,8 @@
                 document.getElementById('itris-email-angebot').textContent = 'Angebotsnummer: ' + (angebotsnummer || 'Nicht gefunden');
                 document.getElementById('itris-email-standort').textContent = 'Standort: ' + (standort || 'Nicht gefunden');
 
-                // Standort in Land-Feld eintragen
-                if (standort) {
-                    document.getElementById('itris-email-country').value = standort;
-                }
+                // Country bleibt auf "Deutschland" (Standort ist nur Info, kein Land)
+                // Das Country-Feld hat bereits den Default "Deutschland"
 
                 if (products.length === 0) {
                     alert('Keine Produkte in der E-Mail gefunden. Bitte prüfen Sie, ob es sich um eine ITRIS-Angebots-E-Mail handelt.');
@@ -2320,7 +2356,7 @@
 
                 parsedProducts = products;
 
-                // Gefundene Produkte anzeigen mit allen SLA-Preisen
+                // Gefundene Produkte anzeigen - jedes Produkt hat nun eigene SLA und Preis
                 const listDiv = document.getElementById('itris-email-products-list');
                 listDiv.innerHTML = products.map((p, idx) => `
                     <div style="padding:8px;margin:5px 0;background:#fff;border:1px solid #ddd;border-radius:4px;">
@@ -2328,7 +2364,7 @@
                             <input type="checkbox" class="itris-email-product-check" data-idx="${idx}" checked>
                             <span>
                                 <strong>${p.name}</strong><br>
-                                <small>S/N: ${p.serialNumber} | 7x24x4: ${p.price7x24x4.toFixed(2)}€ | 5x9x4: ${p.price5x9x4.toFixed(2)}€ | 5x9xNBD: ${p.price5x9xNBD.toFixed(2)}€</small>
+                                <small>S/N: ${p.serialNumber} | SLA: ${p.sla} | Preis: ${p.price.toFixed(2)}€/Monat</small>
                             </span>
                         </label>
                     </div>
@@ -2345,7 +2381,6 @@
 
         document.getElementById('itris-email-add-all').addEventListener('click', () => {
             const checkboxes = document.querySelectorAll('.itris-email-product-check:checked');
-            const selectedSla = document.getElementById('itris-email-sla').value;
             const duration = parseInt(document.getElementById('itris-email-duration').value) || 12;
             const multiplier = parseFloat(document.getElementById('itris-email-multiplier').value) || 1.84;
             const country = document.getElementById('itris-email-country').value.trim() || 'Deutschland';
@@ -2354,14 +2389,9 @@
                 const idx = parseInt(cb.dataset.idx);
                 const product = parsedProducts[idx];
 
-                // Preis basierend auf ausgewähltem SLA
-                let pricePerMonth;
-                switch (selectedSla) {
-                    case '7x24x4': pricePerMonth = product.price7x24x4; break;
-                    case '5x9x4': pricePerMonth = product.price5x9x4; break;
-                    case '5x9xNBD': pricePerMonth = product.price5x9xNBD; break;
-                    default: pricePerMonth = product.price5x9xNBD;
-                }
+                // Jedes Produkt hat bereits seine eigene SLA und Preis
+                const pricePerMonth = product.price;
+                const productSla = product.sla;
 
                 const unitPrice = (pricePerMonth * multiplier * duration).toFixed(1);
                 const purchaseCost = (pricePerMonth * duration).toFixed(2);
@@ -2369,7 +2399,7 @@
 
                 // Duplikat-Check
                 const isDuplicate = cart.some(item =>
-                    item.name === product.name && item.sla === selectedSla &&
+                    item.name === product.name && item.sla === productSla &&
                     item.duration === duration && item.country === country
                 );
 
@@ -2381,13 +2411,13 @@
                         active: 1,
                         manufacturer: manufacturer,
                         category: 'Wartung',
-                        vendor: 'ITRIS GmbH',
+                        vendor: 'ITRIS GmbH Deutschland Nord',
                         unitPrice,
                         qtyInStock: 999,
                         handler: 'Team Wartung',
                         description: description,
                         purchaseCost,
-                        sla: selectedSla,
+                        sla: productSla,
                         country,
                         duration,
                         listPrice: 1,
