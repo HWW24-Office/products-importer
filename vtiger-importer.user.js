@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.9.1
+// @version      1.9.2
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -981,11 +981,7 @@
                     </div>
                     <div class="imp-form-group">
                         <label>Land:</label>
-                        <select id="axians-email-country">
-                            <option value="DE">Deutschland</option>
-                            <option value="AT">Österreich</option>
-                            <option value="CH">Schweiz</option>
-                        </select>
+                        <input type="text" id="axians-email-country" value="Deutschland" placeholder="z.B. Deutschland, Österreich...">
                     </div>
                 </div>
             </div>
@@ -1217,19 +1213,16 @@
             const checkboxes = document.querySelectorAll('.axians-email-product-check:checked');
             const duration = parseInt(document.getElementById('axians-email-duration').value) || 12;
             const multiplier = parseFloat(document.getElementById('axians-email-multiplier').value) || 1.84;
-            const countryCode = document.getElementById('axians-email-country').value;
-            const country = countryMapping[countryCode];
+            const country = document.getElementById('axians-email-country').value.trim() || 'Deutschland';
 
             checkboxes.forEach(cb => {
                 const idx = parseInt(cb.dataset.idx);
                 const product = parsedProducts[idx];
 
                 let unitPriceValue = product.pricePerMonth * multiplier * duration;
-                if (country === "Schweiz") unitPriceValue *= 1.45;
                 const unitPrice = unitPriceValue.toFixed(1);
 
                 let purchaseCost = product.pricePerMonth * duration;
-                if (country === "Schweiz") purchaseCost *= 1.45;
                 purchaseCost = purchaseCost.toFixed(2);
 
                 const manufacturer = extractManufacturer(product.name);
@@ -1250,12 +1243,13 @@
                         unitPrice,
                         qtyInStock: 999,
                         handler: 'Team Wartung',
-                        description: `S/N:\nService Start:\nService Ende:\nRef: ${product.reference}`,
+                        description: 'S/N:\nService Start: tba\nService Ende: tba',
                         purchaseCost,
                         sla: product.sla,
                         country,
                         duration,
-                        listPrice: 1
+                        listPrice: 1,
+                        pricePerMonth: product.pricePerMonth // Speichern fuer Neuberechnung
                     });
                 }
             });
@@ -1268,26 +1262,81 @@
             tbody.innerHTML = '';
             cart.forEach((item, index) => {
                 const row = document.createElement('tr');
+                row.dataset.index = index;
                 row.innerHTML = `
-                    <td contenteditable="true" class="editable">${item.name}</td>
-                    <td>${item.active}</td>
-                    <td contenteditable="true" class="editable">${item.manufacturer}</td>
-                    <td>${item.category}</td>
-                    <td>${item.vendor}</td>
-                    <td contenteditable="true" class="editable">${item.unitPrice}</td>
-                    <td>${item.qtyInStock}</td>
-                    <td>${item.handler}</td>
-                    <td contenteditable="true" class="editable">${item.description.replace(/\n/g, '<br>')}</td>
-                    <td>${item.purchaseCost}</td>
-                    <td>${item.sla}</td>
-                    <td>${item.country}</td>
-                    <td>${item.duration}</td>
-                    <td><button onclick="this.closest('tr').remove(); window.axiansEmailCart.splice(${index}, 1);" class="imp-btn-danger">X</button></td>
+                    <td contenteditable="true" class="editable" data-field="name">${item.name}</td>
+                    <td data-field="active">${item.active}</td>
+                    <td contenteditable="true" class="editable" data-field="manufacturer">${item.manufacturer}</td>
+                    <td data-field="category">${item.category}</td>
+                    <td data-field="vendor">${item.vendor}</td>
+                    <td contenteditable="true" class="editable" data-field="unitPrice">${item.unitPrice}</td>
+                    <td data-field="qtyInStock">${item.qtyInStock}</td>
+                    <td data-field="handler">${item.handler}</td>
+                    <td contenteditable="true" class="editable" data-field="description">${item.description.replace(/\n/g, '<br>')}</td>
+                    <td contenteditable="true" class="editable" data-field="purchaseCost">${item.purchaseCost}</td>
+                    <td contenteditable="true" class="editable" data-field="sla">${item.sla}</td>
+                    <td contenteditable="true" class="editable" data-field="country">${item.country}</td>
+                    <td contenteditable="true" class="editable" data-field="duration">${item.duration}</td>
+                    <td><button class="imp-btn-danger axians-email-remove" data-index="${index}">X</button></td>
                 `;
                 tbody.appendChild(row);
             });
             window.axiansEmailCart = cart;
+
+            // Event-Listener fuer Remove-Buttons
+            tbody.querySelectorAll('.axians-email-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const idx = parseInt(e.target.dataset.index);
+                    cart.splice(idx, 1);
+                    updateTable();
+                });
+            });
         }
+
+        // Funktion zum Auslesen der aktuellen Tabellenwerte
+        function getTableData() {
+            const rows = document.querySelectorAll('#axians-email-table tbody tr');
+            const data = [];
+            rows.forEach(row => {
+                const item = {
+                    name: row.querySelector('[data-field="name"]')?.textContent || '',
+                    active: row.querySelector('[data-field="active"]')?.textContent || '1',
+                    manufacturer: row.querySelector('[data-field="manufacturer"]')?.textContent || '',
+                    category: row.querySelector('[data-field="category"]')?.textContent || 'Wartung',
+                    vendor: row.querySelector('[data-field="vendor"]')?.textContent || '',
+                    unitPrice: row.querySelector('[data-field="unitPrice"]')?.textContent || '0',
+                    qtyInStock: row.querySelector('[data-field="qtyInStock"]')?.textContent || '999',
+                    handler: row.querySelector('[data-field="handler"]')?.textContent || '',
+                    description: (row.querySelector('[data-field="description"]')?.innerHTML || '').replace(/<br\s*\/?>/gi, '\n'),
+                    purchaseCost: row.querySelector('[data-field="purchaseCost"]')?.textContent || '0',
+                    sla: row.querySelector('[data-field="sla"]')?.textContent || '',
+                    country: row.querySelector('[data-field="country"]')?.textContent || '',
+                    duration: row.querySelector('[data-field="duration"]')?.textContent || '12',
+                    listPrice: 1
+                };
+                data.push(item);
+            });
+            return data;
+        }
+
+        // Preise neu berechnen (ohne Warenkorb zu leeren)
+        function recalculatePrices() {
+            const duration = parseInt(document.getElementById('axians-email-duration').value) || 12;
+            const multiplier = parseFloat(document.getElementById('axians-email-multiplier').value) || 1.84;
+
+            cart.forEach(item => {
+                if (item.pricePerMonth) {
+                    item.unitPrice = (item.pricePerMonth * multiplier * duration).toFixed(1);
+                    item.purchaseCost = (item.pricePerMonth * duration).toFixed(2);
+                    item.duration = duration;
+                }
+            });
+            updateTable();
+        }
+
+        // Event-Listener fuer Neuberechnung
+        document.getElementById('axians-email-duration').addEventListener('change', recalculatePrices);
+        document.getElementById('axians-email-multiplier').addEventListener('change', recalculatePrices);
 
         document.getElementById('axians-email-clear').addEventListener('click', () => {
             cart = [];
@@ -1295,13 +1344,16 @@
         });
 
         document.getElementById('axians-email-download').addEventListener('click', () => {
+            // Werte aus der Tabelle lesen (inkl. manueller Aenderungen)
+            const tableData = getTableData();
+
             const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months", "Listenpreis"];
             const csvRows = [headers.join(';')];
-            cart.forEach(item => {
+            tableData.forEach(item => {
                 csvRows.push([
                     item.name, item.active, item.manufacturer, item.category, item.vendor,
                     item.unitPrice, item.qtyInStock, item.handler,
-                    `"${item.description.replace(/\n/g, '\n')}"`,
+                    `"${item.description}"`,
                     item.purchaseCost, item.sla, item.country, item.duration, item.listPrice
                 ].join(';'));
             });
