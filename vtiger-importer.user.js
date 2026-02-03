@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.5
+// @version      1.10.6
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -16,7 +16,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '1.10.5';
+    const SCRIPT_VERSION = '1.10.6';
     console.log('[Products Importer] Version ' + SCRIPT_VERSION + ' geladen');
 
     // PDF.js Worker konfigurieren
@@ -629,15 +629,50 @@
 
                     // Suche nach eingebetteten Nachrichten oder RTF-Body
                     console.log('=== SUCHE NACH BODY-ALTERNATIVEN ===');
-                    // Manchmal ist der Body im RTF-Format komprimiert
-                    if (fileData.body && typeof fileData.body === 'object') {
-                        console.log('Body ist ein Objekt mit Keys:', Object.keys(fileData.body));
-                        // Versuche alle numerischen Indizes zu lesen
-                        const bodyBytes = [];
-                        for (let i = 0; i < 100 && fileData.body[i] !== undefined; i++) {
-                            bodyBytes.push(fileData.body[i]);
+
+                    // Durchsuche die rohen MSG-Daten nach HTML-Content
+                    let foundHtml = '';
+                    if (msgReader.ds && msgReader.ds._buffer) {
+                        const rawData = new Uint8Array(msgReader.ds._buffer);
+                        const decoder = new TextDecoder('utf-8', { fatal: false });
+                        const rawText = decoder.decode(rawData);
+
+                        // Suche nach HTML-Markern
+                        const htmlStartMarkers = ['<html', '<!DOCTYPE', '<body', '<table', '<div'];
+                        for (const marker of htmlStartMarkers) {
+                            const idx = rawText.toLowerCase().indexOf(marker);
+                            if (idx !== -1) {
+                                // Finde das Ende des HTML (</html> oder Ende der Datei)
+                                let endIdx = rawText.toLowerCase().indexOf('</html>', idx);
+                                if (endIdx === -1) endIdx = rawText.length;
+                                else endIdx += 7;
+
+                                const htmlContent = rawText.substring(idx, Math.min(endIdx, idx + 500000));
+                                console.log(`HTML gefunden bei Position ${idx} (${marker}):`, htmlContent.substring(0, 500));
+                                foundHtml = htmlContent;
+                                break;
+                            }
                         }
-                        console.log('Body bytes (erste 100):', bodyBytes);
+
+                        // Wenn kein HTML, suche nach lesbarem Text-Content
+                        if (!foundHtml) {
+                            // Suche nach typischen Email-Mustern
+                            const patterns = ['Angebotsnummer', 'Standort:', 'Seriennummer', 'Preis', '7x24x4', '5x9'];
+                            for (const pattern of patterns) {
+                                const idx = rawText.indexOf(pattern);
+                                if (idx !== -1) {
+                                    // Extrahiere Kontext um das Pattern herum
+                                    const start = Math.max(0, idx - 200);
+                                    const end = Math.min(rawText.length, idx + 2000);
+                                    console.log(`Pattern "${pattern}" gefunden bei ${idx}:`, rawText.substring(start, end));
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (foundHtml) {
+                        console.log('HTML-Content in rohen Daten gefunden!');
                     }
                     console.log('=====================================');
                     console.log('==========================');
@@ -699,6 +734,12 @@
                         } else {
                             bodyHTML = '';
                         }
+                    }
+
+                    // Wenn kein Body gefunden, versuche aus rohen Daten zu extrahieren
+                    if ((!bodyText || bodyText.length < 50) && foundHtml) {
+                        console.log('Verwende HTML aus rohen MSG-Daten');
+                        bodyHTML = foundHtml;
                     }
 
                     console.log('bodyText nach Extraktion:', bodyText ? bodyText.substring(0, 200) : 'LEER');
