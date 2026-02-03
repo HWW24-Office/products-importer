@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.4
+// @version      1.10.5
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -16,7 +16,7 @@
 (function() {
     'use strict';
 
-    const SCRIPT_VERSION = '1.10.4';
+    const SCRIPT_VERSION = '1.10.5';
     console.log('[Products Importer] Version ' + SCRIPT_VERSION + ' geladen');
 
     // PDF.js Worker konfigurieren
@@ -575,27 +575,21 @@
                     const fileData = msgReader.getFileData();
 
                     // DEBUG: Zeige MsgReader-Methoden und alle Daten
-                    console.log('=== MsgReader Object ===');
+                    console.log('=== MsgReader Object (v3.x) ===');
                     console.log('MsgReader methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(msgReader)));
                     console.log('MsgReader own keys:', Object.keys(msgReader));
+                    console.log('fileData ALLE KEYS:', Object.keys(fileData));
 
-                    // Untersuche das ds (DataStream) Objekt
-                    if (msgReader.ds) {
-                        console.log('msgReader.ds keys:', Object.keys(msgReader.ds));
-                    }
-
-                    // Untersuche fileData genauer
-                    if (msgReader.fileData) {
-                        console.log('msgReader.fileData keys:', Object.keys(msgReader.fileData));
-                        // Suche nach allen String-Properties mit Inhalt
-                        for (const key of Object.keys(msgReader.fileData)) {
-                            const val = msgReader.fileData[key];
-                            if (typeof val === 'string' && val.length > 50) {
-                                console.log(`msgReader.fileData.${key} (${val.length} chars):`, val.substring(0, 300));
-                            }
+                    // Zeige alle String-Properties in fileData
+                    for (const key of Object.keys(fileData)) {
+                        const val = fileData[key];
+                        if (typeof val === 'string' && val.length > 0) {
+                            console.log(`fileData.${key} (string, ${val.length} chars):`, val.substring(0, 500));
+                        } else if (val && typeof val === 'object' && !Array.isArray(val)) {
+                            console.log(`fileData.${key} (object):`, Object.keys(val));
                         }
                     }
-                    console.log('========================');
+                    console.log('==============================');
 
                     // DEBUG: Zeige alle verfuegbaren Properties
                     console.log('=== MSG FileData DEBUG ===');
@@ -683,7 +677,8 @@
                         }
                     }
 
-                    let bodyHTML = fileData.bodyHTML || '';
+                    // Versuche verschiedene HTML-Property-Namen (verschiedene MsgReader-Versionen)
+                    let bodyHTML = fileData.bodyHTML || fileData.bodyHtml || fileData.htmlBody || fileData.html || '';
                     if (typeof bodyHTML !== 'string') {
                         // Gleiche Logik fuer HTML
                         if (bodyHTML instanceof ArrayBuffer || bodyHTML instanceof Uint8Array) {
@@ -693,10 +688,21 @@
                             } catch (e) {
                                 bodyHTML = '';
                             }
+                        } else if (bodyHTML && typeof bodyHTML === 'object' && bodyHTML.length !== undefined) {
+                            try {
+                                const uint8 = new Uint8Array(bodyHTML);
+                                const decoder = new TextDecoder('utf-8');
+                                bodyHTML = decoder.decode(uint8);
+                            } catch (e) {
+                                bodyHTML = '';
+                            }
                         } else {
                             bodyHTML = '';
                         }
                     }
+
+                    console.log('bodyText nach Extraktion:', bodyText ? bodyText.substring(0, 200) : 'LEER');
+                    console.log('bodyHTML nach Extraktion:', bodyHTML ? bodyHTML.substring(0, 200) : 'LEER');
 
                     const result = {
                         subject: (fileData.subject || '').toString(),
