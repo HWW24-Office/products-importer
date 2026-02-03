@@ -553,6 +553,134 @@
     }
 
     // ============================================
+    // RTF DEKOMPRIMIERUNG (Outlook LZFu Format)
+    // ============================================
+    function decompressRTF(compressedData) {
+        // Outlook verwendet LZFu-Kompression fuer RTF
+        // Reference: MS-OXRTFCP specification
+        const COMPRESSED_RTF_MAGIC = 0x75465a4c; // "LZFu"
+        const UNCOMPRESSED_RTF_MAGIC = 0x414c454d; // "MELA"
+
+        if (compressedData.length < 16) return null;
+
+        const view = new DataView(compressedData.buffer || compressedData);
+        const compSize = view.getUint32(0, true);
+        const rawSize = view.getUint32(4, true);
+        const magic = view.getUint32(8, true);
+        const crc = view.getUint32(12, true);
+
+        console.log('RTF Header:', { compSize, rawSize, magic: magic.toString(16), crc });
+
+        if (magic === UNCOMPRESSED_RTF_MAGIC) {
+            // Unkomprimiertes RTF
+            const decoder = new TextDecoder('windows-1252');
+            return decoder.decode(compressedData.slice(16));
+        }
+
+        if (magic !== COMPRESSED_RTF_MAGIC) {
+            console.log('Kein gueltiges komprimiertes RTF (Magic:', magic.toString(16), ')');
+            return null;
+        }
+
+        // LZFu Dekompression
+        const prebuf = "{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\fswiss \\fmodern \\fscript \\fdecor MS Sans SesriffSymbolArialTimes New RssmanCoupsriereBook Antiqua;}{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\f0\\fs20\\b\\i\\u\\tab\\tx";
+        const dict = new Uint8Array(4096);
+        const encoder = new TextEncoder();
+        const prebufBytes = encoder.encode(prebuf);
+        dict.set(prebufBytes.slice(0, Math.min(prebufBytes.length, 207)));
+
+        let dictWritePos = 207;
+        let inPos = 16;
+        const output = [];
+
+        try {
+            while (inPos < compressedData.length && output.length < rawSize) {
+                const flags = compressedData[inPos++];
+                for (let i = 0; i < 8 && inPos < compressedData.length && output.length < rawSize; i++) {
+                    if (flags & (1 << i)) {
+                        // Referenz (2 Bytes)
+                        if (inPos + 1 >= compressedData.length) break;
+                        const ref1 = compressedData[inPos++];
+                        const ref2 = compressedData[inPos++];
+                        const offset = (ref1 << 4) | (ref2 >> 4);
+                        const length = (ref2 & 0x0F) + 2;
+
+                        for (let j = 0; j < length && output.length < rawSize; j++) {
+                            const byte = dict[(offset + j) % 4096];
+                            output.push(byte);
+                            dict[dictWritePos] = byte;
+                            dictWritePos = (dictWritePos + 1) % 4096;
+                        }
+                    } else {
+                        // Literal Byte
+                        const byte = compressedData[inPos++];
+                        output.push(byte);
+                        dict[dictWritePos] = byte;
+                        dictWritePos = (dictWritePos + 1) % 4096;
+                    }
+                }
+            }
+        } catch (e) {
+            console.log('RTF Dekompression Fehler:', e);
+        }
+
+        const decoder = new TextDecoder('windows-1252');
+        return decoder.decode(new Uint8Array(output));
+    }
+
+    // RTF zu Plaintext konvertieren
+    function rtfToText(rtf) {
+        if (!rtf || typeof rtf !== 'string') return '';
+
+        let text = rtf;
+        // RTF Control Words entfernen
+        text = text.replace(/\\par\b/gi, '\n');
+        text = text.replace(/\\line\b/gi, '\n');
+        text = text.replace(/\\tab\b/gi, '\t');
+        text = text.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+        text = text.replace(/\\u([0-9]+)\??/gi, (m, code) => String.fromCharCode(parseInt(code)));
+        // Gruppen und Control Words entfernen
+        text = text.replace(/\{[^{}]*\}/g, '');
+        text = text.replace(/\\[a-z0-9*-]+\s?/gi, '');
+        text = text.replace(/[{}]/g, '');
+        // Bereinigen
+        text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        text = text.replace(/\n{3,}/g, '\n\n');
+        return text.trim();
+    }
+
+    // Komprimierten RTF-Body aus MSG-Rohdaten extrahieren
+    function extractCompressedRTF(buffer) {
+        const data = new Uint8Array(buffer);
+        // Suche nach LZFu Magic (0x4c5a4675 little-endian an Position +8)
+        // Oder nach RTF-Header Pattern in den Properties
+        // MSG Property ID fuer compressedRTF: 0x10090102
+
+        // Suche nach dem LZFu Header-Pattern
+        for (let i = 0; i < data.length - 20; i++) {
+            // Pruefe auf plausible Header-Werte
+            const view = new DataView(buffer, i);
+            try {
+                const compSize = view.getUint32(0, true);
+                const rawSize = view.getUint32(4, true);
+                const magic = view.getUint32(8, true);
+
+                // LZFu Magic: 0x75465a4c
+                if (magic === 0x75465a4c && compSize > 20 && compSize < 1000000 && rawSize > 20 && rawSize < 2000000) {
+                    console.log('Potenzieller RTF-Block gefunden bei Position', i, 'compSize:', compSize, 'rawSize:', rawSize);
+                    // Extrahiere den Block
+                    if (i + compSize <= data.length) {
+                        return data.slice(i, i + compSize);
+                    }
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        return null;
+    }
+
+    // ============================================
     // MSG-DATEI LESEN (Outlook E-Mails)
     // ============================================
     async function readMsgFile(file) {
@@ -744,6 +872,49 @@
 
                     console.log('bodyText nach Extraktion:', bodyText ? bodyText.substring(0, 200) : 'LEER');
                     console.log('bodyHTML nach Extraktion:', bodyHTML ? bodyHTML.substring(0, 200) : 'LEER');
+
+                    // Wenn Body immer noch leer/kurz, versuche komprimiertes RTF zu extrahieren
+                    if ((!bodyText || bodyText.length < 50) && (!bodyHTML || bodyHTML.length < 50)) {
+                        console.log('=== VERSUCHE RTF-DEKOMPRESSION ===');
+                        try {
+                            // Pruefe ob fileData.compressedRtf existiert (manche MsgReader-Versionen)
+                            let compressedRtfData = fileData.compressedRtf || fileData.rtfCompressed || fileData.bodyRtf;
+
+                            // Wenn nicht, versuche aus rohen Daten zu extrahieren
+                            if (!compressedRtfData && msgReader.ds && msgReader.ds._buffer) {
+                                console.log('Suche komprimiertes RTF in rohen MSG-Daten...');
+                                compressedRtfData = extractCompressedRTF(msgReader.ds._buffer);
+                            }
+
+                            if (compressedRtfData) {
+                                console.log('Komprimiertes RTF gefunden, Laenge:', compressedRtfData.length || compressedRtfData.byteLength);
+                                // In Uint8Array konvertieren falls noetig
+                                let rtfBytes = compressedRtfData;
+                                if (compressedRtfData instanceof ArrayBuffer) {
+                                    rtfBytes = new Uint8Array(compressedRtfData);
+                                } else if (!(compressedRtfData instanceof Uint8Array)) {
+                                    rtfBytes = new Uint8Array(compressedRtfData);
+                                }
+
+                                const rtfContent = decompressRTF(rtfBytes);
+                                if (rtfContent && rtfContent.length > 50) {
+                                    console.log('RTF dekomprimiert, Laenge:', rtfContent.length);
+                                    console.log('RTF Vorschau:', rtfContent.substring(0, 500));
+                                    // RTF zu Text konvertieren
+                                    bodyText = rtfToText(rtfContent);
+                                    console.log('RTF zu Text konvertiert, Laenge:', bodyText.length);
+                                    if (bodyText.length > 100) {
+                                        console.log('Text Vorschau:', bodyText.substring(0, 500));
+                                    }
+                                }
+                            } else {
+                                console.log('Kein komprimiertes RTF gefunden');
+                            }
+                        } catch (rtfError) {
+                            console.log('RTF-Dekompression fehlgeschlagen:', rtfError);
+                        }
+                        console.log('==================================');
+                    }
 
                     const result = {
                         subject: (fileData.subject || '').toString(),
