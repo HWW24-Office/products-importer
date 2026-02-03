@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.8.0
+// @version      1.9.0
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -203,6 +203,7 @@
                 </div>
                 <div id="importer-tabs">
                     <button class="importer-tab active" data-panel="axians">Axians List</button>
+                    <button class="importer-tab" data-panel="axians-email">Axians Email</button>
                     <button class="importer-tab" data-panel="technogroup">Technogroup List</button>
                     <button class="importer-tab" data-panel="technogroup-pdf">Technogroup PDF</button>
                     <button class="importer-tab" data-panel="parkplace">Parkplace Excel</button>
@@ -213,6 +214,8 @@
                 <div id="importer-content">
                     <!-- Axians Panel -->
                     <div class="importer-panel active" id="panel-axians"></div>
+                    <!-- Axians Email Panel -->
+                    <div class="importer-panel" id="panel-axians-email"></div>
                     <!-- Technogroup Panel -->
                     <div class="importer-panel" id="panel-technogroup"></div>
                     <!-- Technogroup PDF Panel -->
@@ -939,6 +942,341 @@
                 ].join(';'));
             });
             downloadCSV(csvRows, 'crm_import_axians.csv');
+        });
+    }
+
+    // ============================================
+    // AXIANS EMAIL IMPORTER
+    // ============================================
+    function initAxiansEmail() {
+        const panel = document.getElementById('panel-axians-email');
+        panel.innerHTML = `
+            <h3>Axians Email Importer</h3>
+            <p style="color:#666;margin-bottom:15px;">Liest Angebote direkt aus Axians E-Mails (.msg Dateien)</p>
+            <div class="imp-row-grid">
+                <div class="imp-form-group">
+                    <label>Email (.msg Datei):</label>
+                    <input type="file" id="axians-email-file" accept=".msg" class="imp-hidden">
+                    <div class="imp-drop-zone" id="axians-email-dropzone">MSG-Datei hierher ziehen oder klicken</div>
+                    <button id="axians-email-process">Email verarbeiten</button>
+                </div>
+                <div>
+                    <div class="imp-form-group">
+                        <label>Laufzeit (Monate):</label>
+                        <input type="number" id="axians-email-duration" value="12">
+                    </div>
+                    <div class="imp-form-group">
+                        <label>Preis-Multiplikator:</label>
+                        <input type="number" id="axians-email-multiplier" value="1.84" step="0.01">
+                    </div>
+                    <div class="imp-form-group">
+                        <label>Land:</label>
+                        <select id="axians-email-country">
+                            <option value="DE">Deutschland</option>
+                            <option value="AT">Österreich</option>
+                            <option value="CH">Schweiz</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div id="axians-email-info" style="margin:15px 0;padding:10px;background:#f5f5f5;border-radius:4px;display:none;">
+                <strong>Email-Info:</strong>
+                <div id="axians-email-subject"></div>
+                <div id="axians-email-reference"></div>
+                <div id="axians-email-date"></div>
+            </div>
+            <div id="axians-email-parsed" style="margin:15px 0;display:none;">
+                <h4>Gefundene Produkte:</h4>
+                <div id="axians-email-products-list"></div>
+                <button id="axians-email-add-all" style="margin-top:10px;">Alle zum Warenkorb hinzufügen</button>
+            </div>
+            <div class="imp-form-group">
+                <button id="axians-email-clear" class="imp-btn-danger">Warenkorb leeren</button>
+            </div>
+            <h4>Warenkorb</h4>
+            <div style="overflow-x:auto;">
+                <table class="imp-table" id="axians-email-table">
+                    <thead>
+                        <tr>
+                            <th>Product Name</th>
+                            <th>Active</th>
+                            <th>Manufacturer</th>
+                            <th>Category</th>
+                            <th>Vendor</th>
+                            <th>Unit Price</th>
+                            <th>Stock</th>
+                            <th>Handler</th>
+                            <th>Description</th>
+                            <th>Purchase Cost</th>
+                            <th>SLA</th>
+                            <th>Country</th>
+                            <th>Duration</th>
+                            <th>Aktion</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+            <button id="axians-email-download">CSV speichern</button>
+        `;
+
+        // SLA-Mapping von Email-Format zu VTiger-Format
+        const slaMappings = {
+            "5/9/NBD/-": "5x9xNBD",
+            "5/9/NBD": "5x9xNBD",
+            "5x9xNBD": "5x9xNBD",
+            "7/24/4/-": "7x24x4",
+            "7/24/4": "7x24x4",
+            "7x24x4": "7x24x4",
+            "5/13/4/-": "5x13x4",
+            "5/13/4": "5x13x4",
+            "7/24/6/-": "7x24x6",
+            "7/24/6": "7x24x6"
+        };
+
+        let parsedProducts = [];
+        let cart = [];
+
+        const fileInput = document.getElementById('axians-email-file');
+        const dropZone = document.getElementById('axians-email-dropzone');
+        setupDropZone(dropZone, fileInput);
+
+        // E-Mail-Text parsen
+        function parseAxiansEmail(body, subject) {
+            const products = [];
+            const lines = body.split('\n');
+
+            // Referenznummer extrahieren
+            const refMatch = body.match(/Referenz-Nr\.?:\s*(#\d+-\d+[a-z]*\d*)/i) ||
+                            subject.match(/(#\d+-\d+[a-z]*\d*)/i);
+            const reference = refMatch ? refMatch[1] : '';
+
+            // Produkt-Pattern: Produktname gefolgt von "Full Service SLA: X/X/X" und Preis
+            let currentProduct = null;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i].trim();
+
+                // Stopp bei Fußzeile
+                if (line.includes('Bitte geben Sie bei weiterer Korrespondenz') ||
+                    line.includes('Es gelten die allgemeinen Wartungsvertragsbedingungen')) {
+                    break;
+                }
+
+                // Prüfen ob es eine SLA-Zeile ist
+                const slaMatch = line.match(/Full Service SLA:\s*([0-9x\/]+(?:NBD)?)\/?-?\s*\(.*?\)\s*([\d.,]+)\s*[€]/i);
+
+                if (slaMatch) {
+                    const slaRaw = slaMatch[1].replace(/\//g, 'x').replace(/x-$/, '').replace(/xNBD$/, 'xNBD').trim();
+                    const priceStr = slaMatch[2].replace('.', '').replace(',', '.');
+                    const price = parseFloat(priceStr);
+
+                    // Produktname aus vorherigen Zeilen finden
+                    let productName = '';
+                    for (let j = i - 1; j >= Math.max(0, i - 5); j--) {
+                        const prevLine = lines[j].trim();
+                        if (prevLine && !prevLine.includes('Full Service') && !prevLine.includes('€') &&
+                            !prevLine.includes('Angebot') && prevLine.length > 2 && prevLine.length < 200) {
+                            productName = prevLine;
+                            break;
+                        }
+                    }
+
+                    if (productName && !isNaN(price)) {
+                        // SLA normalisieren
+                        let sla = slaRaw;
+                        for (const [key, value] of Object.entries(slaMappings)) {
+                            if (slaRaw.toLowerCase().includes(key.toLowerCase().replace(/x/g, '')) ||
+                                slaRaw.toLowerCase() === key.toLowerCase()) {
+                                sla = value;
+                                break;
+                            }
+                        }
+                        // Vereinfachte SLA-Erkennung
+                        if (slaRaw.includes('NBD') || slaRaw.includes('nbd')) {
+                            sla = '5x9xNBD';
+                        } else if (slaRaw.match(/7.*24.*4/)) {
+                            sla = '7x24x4';
+                        } else if (slaRaw.match(/5.*9.*NBD/i)) {
+                            sla = '5x9xNBD';
+                        }
+
+                        products.push({
+                            name: productName,
+                            sla: sla,
+                            pricePerMonth: price,
+                            reference: reference
+                        });
+                    }
+                }
+            }
+
+            return { products, reference };
+        }
+
+        // Hersteller aus Produktname extrahieren
+        function extractManufacturer(productName) {
+            const manufacturers = {
+                'Fujitsu': ['Fujitsu', 'Primergy', 'Eternus', 'PY '],
+                'HPE': ['HP ', 'HPE', 'ProLiant', 'Proliant', '3PAR', 'Nimble'],
+                'Dell': ['Dell', 'PowerEdge', 'PowerVault', 'EqualLogic', 'Compellent'],
+                'NetApp': ['NetApp', 'FAS', 'AFF'],
+                'IBM': ['IBM', 'System x', 'Storwize', 'FlashSystem'],
+                'Lenovo': ['Lenovo', 'ThinkSystem', 'ThinkServer'],
+                'Cisco': ['Cisco', 'UCS'],
+                'Oracle': ['Oracle', 'Sun '],
+                'Seagate': ['Seagate'],
+                'Wortmann': ['Wortmann', 'Terra']
+            };
+
+            for (const [mfr, keywords] of Object.entries(manufacturers)) {
+                for (const kw of keywords) {
+                    if (productName.toLowerCase().includes(kw.toLowerCase())) {
+                        return mfr;
+                    }
+                }
+            }
+            return 'Sonstiges';
+        }
+
+        document.getElementById('axians-email-process').addEventListener('click', async () => {
+            const file = fileInput.files[0];
+            if (!file) {
+                alert('Bitte eine .msg Datei auswählen.');
+                return;
+            }
+
+            try {
+                const emailData = await readMsgFile(file);
+                const { products, reference } = parseAxiansEmail(emailData.body, emailData.subject);
+
+                // Info anzeigen
+                document.getElementById('axians-email-info').style.display = 'block';
+                document.getElementById('axians-email-subject').textContent = 'Betreff: ' + emailData.subject;
+                document.getElementById('axians-email-reference').textContent = 'Referenz: ' + (reference || 'Nicht gefunden');
+                document.getElementById('axians-email-date').textContent = 'Von: ' + emailData.from;
+
+                if (products.length === 0) {
+                    alert('Keine Produkte in der E-Mail gefunden. Bitte prüfen Sie, ob es sich um eine Axians-Angebots-E-Mail handelt.');
+                    document.getElementById('axians-email-parsed').style.display = 'none';
+                    return;
+                }
+
+                parsedProducts = products;
+
+                // Gefundene Produkte anzeigen
+                const listDiv = document.getElementById('axians-email-products-list');
+                listDiv.innerHTML = products.map((p, idx) => `
+                    <div style="padding:8px;margin:5px 0;background:#fff;border:1px solid #ddd;border-radius:4px;">
+                        <label style="display:flex;align-items:center;gap:10px;">
+                            <input type="checkbox" class="axians-email-product-check" data-idx="${idx}" checked>
+                            <span><strong>${p.name}</strong> - SLA: ${p.sla} - ${p.pricePerMonth.toFixed(2)} €/Monat</span>
+                        </label>
+                    </div>
+                `).join('');
+
+                document.getElementById('axians-email-parsed').style.display = 'block';
+                dropZone.textContent = file.name;
+
+            } catch (error) {
+                console.error('Fehler beim Verarbeiten der E-Mail:', error);
+                alert('Fehler beim Verarbeiten der E-Mail: ' + error.message);
+            }
+        });
+
+        document.getElementById('axians-email-add-all').addEventListener('click', () => {
+            const checkboxes = document.querySelectorAll('.axians-email-product-check:checked');
+            const duration = parseInt(document.getElementById('axians-email-duration').value) || 12;
+            const multiplier = parseFloat(document.getElementById('axians-email-multiplier').value) || 1.84;
+            const countryCode = document.getElementById('axians-email-country').value;
+            const country = countryMapping[countryCode];
+
+            checkboxes.forEach(cb => {
+                const idx = parseInt(cb.dataset.idx);
+                const product = parsedProducts[idx];
+
+                let unitPriceValue = product.pricePerMonth * multiplier * duration;
+                if (country === "Schweiz") unitPriceValue *= 1.45;
+                const unitPrice = unitPriceValue.toFixed(1);
+
+                let purchaseCost = product.pricePerMonth * duration;
+                if (country === "Schweiz") purchaseCost *= 1.45;
+                purchaseCost = purchaseCost.toFixed(2);
+
+                const manufacturer = extractManufacturer(product.name);
+
+                // Duplikat-Check
+                const isDuplicate = cart.some(item =>
+                    item.name === product.name && item.sla === product.sla &&
+                    item.duration === duration && item.country === country
+                );
+
+                if (!isDuplicate) {
+                    cart.push({
+                        name: product.name,
+                        active: 1,
+                        manufacturer: manufacturer,
+                        category: 'Wartung',
+                        vendor: 'Axians IT-Infrastructure Services GmbH',
+                        unitPrice,
+                        qtyInStock: 999,
+                        handler: 'Team Wartung',
+                        description: `S/N:\nService Start:\nService Ende:\nRef: ${product.reference}`,
+                        purchaseCost,
+                        sla: product.sla,
+                        country,
+                        duration,
+                        listPrice: 1
+                    });
+                }
+            });
+
+            updateTable();
+        });
+
+        function updateTable() {
+            const tbody = document.querySelector('#axians-email-table tbody');
+            tbody.innerHTML = '';
+            cart.forEach((item, index) => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td contenteditable="true" class="editable">${item.name}</td>
+                    <td>${item.active}</td>
+                    <td contenteditable="true" class="editable">${item.manufacturer}</td>
+                    <td>${item.category}</td>
+                    <td>${item.vendor}</td>
+                    <td contenteditable="true" class="editable">${item.unitPrice}</td>
+                    <td>${item.qtyInStock}</td>
+                    <td>${item.handler}</td>
+                    <td contenteditable="true" class="editable">${item.description.replace(/\n/g, '<br>')}</td>
+                    <td>${item.purchaseCost}</td>
+                    <td>${item.sla}</td>
+                    <td>${item.country}</td>
+                    <td>${item.duration}</td>
+                    <td><button onclick="this.closest('tr').remove(); window.axiansEmailCart.splice(${index}, 1);" class="imp-btn-danger">X</button></td>
+                `;
+                tbody.appendChild(row);
+            });
+            window.axiansEmailCart = cart;
+        }
+
+        document.getElementById('axians-email-clear').addEventListener('click', () => {
+            cart = [];
+            updateTable();
+        });
+
+        document.getElementById('axians-email-download').addEventListener('click', () => {
+            const headers = ["Product Name", "Product Active", "Manufacturer", "Product Category", "Vendor Name", "Unit Price", "Qty. in Stock", "Handler", "Description", "Purchase Cost", "SLA", "Country", "Duration in months", "Listenpreis"];
+            const csvRows = [headers.join(';')];
+            cart.forEach(item => {
+                csvRows.push([
+                    item.name, item.active, item.manufacturer, item.category, item.vendor,
+                    item.unitPrice, item.qtyInStock, item.handler,
+                    `"${item.description.replace(/\n/g, '\n')}"`,
+                    item.purchaseCost, item.sla, item.country, item.duration, item.listPrice
+                ].join(';'));
+            });
+            downloadCSV(csvRows, 'crm_import_axians_email.csv');
         });
     }
 
@@ -3143,6 +3481,7 @@
     function init() {
         addFloatingButton();
         initAxians();
+        initAxiansEmail();
         initTechnogroup();
         initTechnogroupPDF();
         initParkplace();
