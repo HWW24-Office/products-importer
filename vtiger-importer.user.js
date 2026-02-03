@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.1
+// @version      1.10.2
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -596,9 +596,26 @@
                         result.body = temp.textContent || temp.innerText || '';
                     }
 
+                    // Finale Sicherheitspruefung: result.body MUSS ein String sein
+                    if (typeof result.body !== 'string') {
+                        if (result.body && result.body.toString) {
+                            result.body = result.body.toString();
+                        } else if (result.body && typeof result.body === 'object') {
+                            // Falls body ein Objekt ist (z.B. ArrayBuffer), versuche zu dekodieren
+                            try {
+                                const decoder = new TextDecoder('utf-8');
+                                result.body = decoder.decode(result.body);
+                            } catch (e) {
+                                result.body = '';
+                            }
+                        } else {
+                            result.body = '';
+                        }
+                    }
+
                     console.log('MSG-Datei gelesen:', result.subject);
                     console.log('Body Laenge:', result.body.length);
-                    if (result.body) {
+                    if (result.body && result.body.length > 0) {
                         console.log('Body Vorschau:', result.body.substring(0, 500) + '...');
                     }
 
@@ -1071,6 +1088,12 @@
         // E-Mail-Text parsen
         function parseAxiansEmail(body, subject) {
             const products = [];
+
+            // Sicherstellen dass body ein String ist
+            if (typeof body !== 'string') {
+                body = body ? String(body) : '';
+            }
+
             const lines = body.split('\n');
 
             // Referenznummer extrahieren
@@ -1531,6 +1554,11 @@
         // ITRIS E-Mail-Text parsen
         function parseItrisEmail(body, subject) {
             const products = [];
+
+            // Sicherstellen dass body ein String ist
+            if (typeof body !== 'string') {
+                body = body ? String(body) : '';
+            }
 
             // Angebotsnummer extrahieren (z.B. "Angebotsnummer: W-77111904")
             const angebotMatch = body.match(/Angebotsnummer:\s*([A-Z0-9\-]+)/i);
