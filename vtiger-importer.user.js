@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.0
+// @version      1.10.1
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -565,12 +565,27 @@
                     const msgReader = new MsgReaderClass(arrayBuffer);
                     const fileData = msgReader.getFileData();
 
-                    // E-Mail-Daten extrahieren
+                    // E-Mail-Daten extrahieren (mit Typ-Pruefung)
+                    let bodyText = fileData.body || '';
+                    // Falls body kein String ist, versuche zu konvertieren
+                    if (typeof bodyText !== 'string') {
+                        if (bodyText && bodyText.toString) {
+                            bodyText = bodyText.toString();
+                        } else {
+                            bodyText = '';
+                        }
+                    }
+
+                    let bodyHTML = fileData.bodyHTML || '';
+                    if (typeof bodyHTML !== 'string') {
+                        bodyHTML = '';
+                    }
+
                     const result = {
-                        subject: fileData.subject || '',
-                        from: fileData.senderName || fileData.senderEmail || '',
-                        body: fileData.body || '',
-                        bodyHTML: fileData.bodyHTML || '',
+                        subject: (fileData.subject || '').toString(),
+                        from: (fileData.senderName || fileData.senderEmail || '').toString(),
+                        body: bodyText,
+                        bodyHTML: bodyHTML,
                         attachments: fileData.attachments || []
                     };
 
@@ -582,7 +597,10 @@
                     }
 
                     console.log('MSG-Datei gelesen:', result.subject);
-                    console.log('Body:', result.body.substring(0, 500) + '...');
+                    console.log('Body Laenge:', result.body.length);
+                    if (result.body) {
+                        console.log('Body Vorschau:', result.body.substring(0, 500) + '...');
+                    }
 
                     resolve(result);
                 } catch (error) {
