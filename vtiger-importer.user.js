@@ -2191,10 +2191,10 @@
                 console.log('Versuche ITRIS RTF-Format zu parsen...');
 
                 // Suche nach Seriennummern gefolgt von 3 Preisen (mit beliebigen Artefakten dazwischen)
-                // S/N Pattern: Buchstabe + alphanumerisch 6-10 Zeichen
-                // Preise: XX, oder XX,XX mit optionalem Euro-Zeichen (Nachkommastellen können fehlen durch LZFu)
-                // Die 0+ vor den Preisen sind Artefakte die wir ignorieren
-                const snPattern = /([A-Z][A-Z0-9]{5,10})[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\d*\s*€/gi;
+                // S/N Pattern: Buchstabe + alphanumerisch 6-10 Zeichen (mit führenden Nullen-Artefakten)
+                // Preise: XX, oder XX,XX mit Euro-Zeichen (Nachkommastellen können fehlen durch LZFu)
+                // Die 0+ vor den Werten sind Artefakte die wir ignorieren
+                const snPattern = /0*([A-Z][A-Z0-9]{5,10})0*[\s\S]{0,50}?0*(\d{1,3})[,.]?\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\s*€[\s\S]{0,50}?0*(\d{1,3})[,.]?\s*€/gi;
                 let match;
 
                 while ((match = snPattern.exec(body)) !== null) {
