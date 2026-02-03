@@ -655,12 +655,17 @@
             // Entferne korrupte RTF-Artefakte (aus LZFu-Dekompression)
             // Diese entstehen durch kleine Fehler im LZFu-Dictionary
             html = html.replace(/\d*a?reen\d*/gi, '');
-            html = html.replace(/gree\d*/gi, '');
+            html = html.replace(/ree\d*/gi, '');
             html = html.replace(/ugreen\w*/gi, '');
             html = html.replace(/g'[a-z]+\d*/gi, '');
             html = html.replace(/fg'fc[a-z]*/gi, '');
             html = html.replace(/\d{3,}[a-z]?htmlrtf/gi, '');
+            // Korrigiere bekannte LZFu-Zeichen-Fehler
+            html = html.replace(/a'80/g, '€');  // Euro-Zeichen
+            html = html.replace(/0\\&/g, '&');  // Ampersand
+            html = html.replace(/0\\ /g, ' ');  // Escaped space
             html = html.replace(/000+/g, ' ');
+            html = html.replace(/00+/g, ' ');
 
             // Konvertiere RTF-Escapes
             html = html.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
@@ -2177,6 +2182,58 @@
                             }
                         }
                     }
+                }
+            }
+
+            // Vierter Fallback: ITRIS RTF-Format
+            // Format: "TS7420 G3 ... Bezeichnung ... Kaufpreis ... R6822929 ... 56,00 € ... 51,00 € ... 46,00 €"
+            if (products.length === 0) {
+                console.log('Versuche ITRIS RTF-Format zu parsen...');
+
+                // Suche nach Seriennummern gefolgt von 3 Preisen
+                // S/N Pattern: R + Ziffern oder alphanumerisch 6-10 Zeichen
+                const snPattern = /([A-Z][A-Z0-9]{5,10})\s+(\d{1,3}(?:[.,]\d{2,3})*)\s*€?\s+(\d{1,3}(?:[.,]\d{2,3})*)\s*€?\s+(\d{1,3}(?:[.,]\d{2,3})*)\s*€?/gi;
+                let match;
+
+                while ((match = snPattern.exec(body)) !== null) {
+                    const serialNumber = match[1];
+
+                    // Ueberspringe bekannte Nicht-Seriennummern
+                    if (/^(Gesamt|Monate|Monat|Total|EUR|MwSt|ITRIS)$/i.test(serialNumber)) continue;
+                    // Seriennummer sollte mindestens eine Ziffer enthalten
+                    if (!/\d/.test(serialNumber)) continue;
+
+                    const parsePrice = (s) => parseFloat(s.replace(/\./g, '').replace(',', '.'));
+                    const price1 = parsePrice(match[2]);
+                    const price2 = parsePrice(match[3]);
+                    const price3 = parsePrice(match[4]);
+
+                    // Preise sollten plausibel sein (monatliche Wartungskosten: 10-5000 EUR)
+                    if (price1 < 5 || price1 > 10000) continue;
+
+                    // Finde Produktname vor der Seriennummer
+                    const beforeMatch = body.substring(Math.max(0, match.index - 500), match.index);
+
+                    // Suche nach Typ/Modell (z.B. "TS7420 G3")
+                    const typMatch = beforeMatch.match(/([A-Z]{2}[A-Z0-9]+(?:\s+[A-Z0-9]+)?)\s+(?:TGERRA|TERRA|Server|Storage|Switch)/i);
+                    const typ = typMatch ? typMatch[1] : '';
+
+                    // Suche nach Bezeichnung
+                    const bezeichnungMatch = beforeMatch.match(/((?:TGERRA|TERRA|Server|Storage)[^€]{10,100}?)(?:\d{1,3}[.,]\d{2,3}|$)/i);
+                    const bezeichnung = bezeichnungMatch ? bezeichnungMatch[1].trim() : '';
+
+                    const productName = typ ? (bezeichnung ? typ + ' - ' + bezeichnung : typ) : (bezeichnung || 'Unbekannt');
+
+                    console.log('Gefunden: S/N=' + serialNumber + ', Typ=' + typ + ', Preise=' + price1 + '/' + price2 + '/' + price3);
+
+                    products.push({
+                        name: productName,
+                        typ: typ,
+                        serialNumber: serialNumber,
+                        price7x24x4: price1,
+                        price5x9x4: price2,
+                        price5x9xNBD: price3
+                    });
                 }
             }
 
