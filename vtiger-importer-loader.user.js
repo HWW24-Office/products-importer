@@ -1,14 +1,15 @@
 // ==UserScript==
 // @name         VTiger Products Importer (Loader)
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.0.0
-// @description  Laedt den VTiger Products Importer automatisch von GitHub
+// @version      1.2.0
+// @description  Laedt den VTiger Products Importer automatisch von GitHub (inkl. MSG-Support)
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_addElement
 // @connect      raw.githubusercontent.com
 // @connect      cdnjs.cloudflare.com
+// @connect      esm.sh
 // @updateURL    https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer-loader.user.js
 // @downloadURL  https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer-loader.user.js
 // ==/UserScript==
@@ -58,24 +59,61 @@
         document.head.appendChild(script);
     }
 
+    // ES-Modul laden und als globale Variable exportieren
+    function loadESModule(url, globalName) {
+        return new Promise((resolve, reject) => {
+            const eventName = globalName + 'Loaded';
+            const timeoutId = setTimeout(() => {
+                reject(new Error('Timeout beim Laden von ' + globalName));
+            }, 10000);
+
+            const script = document.createElement('script');
+            script.type = 'module';
+            script.textContent =
+                'import Module from "' + url + '";' +
+                'window.' + globalName + ' = Module.default || Module;' +
+                'window.dispatchEvent(new CustomEvent("' + eventName + '"));';
+
+            window.addEventListener(eventName, () => {
+                clearTimeout(timeoutId);
+                resolve();
+            }, { once: true });
+
+            script.onerror = (e) => {
+                clearTimeout(timeoutId);
+                reject(e);
+            };
+            document.head.appendChild(script);
+        });
+    }
+
     // Hauptfunktion
     async function init() {
         try {
+            console.log('[VTiger Importer] Lade Bibliotheken...');
+
             // 1. Externe Bibliotheken laden
             await injectScript(XLSX_URL);
-            await injectScript(PDFJS_URL);
+            console.log('[VTiger Importer] XLSX geladen');
 
-            // 2. Hauptscript von GitHub laden
+            await injectScript(PDFJS_URL);
+            console.log('[VTiger Importer] PDF.js geladen');
+
+            // 2. MsgReader als ES-Modul laden (ueber esm.sh)
+            await loadESModule('https://esm.sh/msgreader@1.0.1', 'MsgReader');
+            console.log('[VTiger Importer] MsgReader geladen');
+
+            // 3. Hauptscript von GitHub laden
             const mainScript = await loadScript(SCRIPT_URL);
 
-            // 3. Die Userscript-Header entfernen und Code extrahieren
+            // 4. Die Userscript-Header entfernen und Code extrahieren
             const codeStart = mainScript.indexOf('(function()');
             if (codeStart === -1) {
                 throw new Error('Could not find script code');
             }
             const cleanCode = mainScript.substring(codeStart);
 
-            // 4. Script ausfuehren
+            // 5. Script ausfuehren
             injectInlineScript(cleanCode);
 
             console.log('[VTiger Importer] Erfolgreich geladen von GitHub');
