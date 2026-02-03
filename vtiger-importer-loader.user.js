@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer (Loader)
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.2.1
+// @version      1.2.2
 // @description  Laedt den VTiger Products Importer automatisch von GitHub (inkl. MSG-Support)
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -10,6 +10,8 @@
 // @connect      raw.githubusercontent.com
 // @connect      cdnjs.cloudflare.com
 // @connect      esm.sh
+// @connect      cdn.jsdelivr.net
+// @connect      unpkg.com
 // @updateURL    https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer-loader.user.js
 // @downloadURL  https://raw.githubusercontent.com/HWW24-Office/products-importer/main/vtiger-importer-loader.user.js
 // ==/UserScript==
@@ -87,7 +89,7 @@
         });
     }
 
-    const LOADER_VERSION = '1.2.1';
+    const LOADER_VERSION = '1.2.2';
 
     // Hauptfunktion
     async function init() {
@@ -102,9 +104,38 @@
             await injectScript(PDFJS_URL);
             console.log('[VTiger Importer] PDF.js geladen');
 
-            // 2. MsgReader als ES-Modul laden (ueber esm.sh) - Version 3.x hat bessere HTML-Unterstuetzung
-            await loadESModule('https://esm.sh/@poplor/msgreader@3.2.0', 'MsgReader');
-            console.log('[VTiger Importer] MsgReader v3.2.0 geladen');
+            // 2. MsgReader laden - versuche verschiedene Quellen
+            let msgReaderLoaded = false;
+
+            // Versuch 1: jsdelivr mit UMD build
+            try {
+                await injectScript('https://cdn.jsdelivr.net/npm/@poplor/msgreader@3.2.0/dist/MsgReader.umd.min.js');
+                if (window.MsgReader) {
+                    msgReaderLoaded = true;
+                    console.log('[VTiger Importer] MsgReader v3.2.0 (jsdelivr) geladen');
+                }
+            } catch (e) {
+                console.log('[VTiger Importer] jsdelivr fehlgeschlagen, versuche Alternative...');
+            }
+
+            // Versuch 2: unpkg mit der alten Version
+            if (!msgReaderLoaded) {
+                try {
+                    await injectScript('https://unpkg.com/msgreader@1.0.1/dist/MsgReader.js');
+                    if (window.MsgReader) {
+                        msgReaderLoaded = true;
+                        console.log('[VTiger Importer] MsgReader v1.0.1 (unpkg) geladen');
+                    }
+                } catch (e) {
+                    console.log('[VTiger Importer] unpkg fehlgeschlagen');
+                }
+            }
+
+            // Versuch 3: esm.sh als Fallback
+            if (!msgReaderLoaded) {
+                await loadESModule('https://esm.sh/msgreader@1.0.1', 'MsgReader');
+                console.log('[VTiger Importer] MsgReader v1.0.1 (esm.sh) geladen');
+            }
 
             // 3. Hauptscript von GitHub laden
             const mainScript = await loadScript(SCRIPT_URL);
