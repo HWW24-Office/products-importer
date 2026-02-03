@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.9.2
+// @version      1.9.3
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -1057,6 +1057,40 @@
                             subject.match(/(#\d+-\d+[a-z]*\d*)/i);
             const reference = refMatch ? refMatch[1] : '';
 
+            // Standort extrahieren (z.B. "Standort: Österreich")
+            const standortMatch = body.match(/Standort:\s*([^\n\r]+)/i);
+            let standort = standortMatch ? standortMatch[1].trim() : '';
+            // Bereinige Standort (entferne evtl. nachfolgende Texte)
+            if (standort) {
+                standort = standort.split(/\s{2,}/)[0].trim(); // Stoppe bei mehreren Leerzeichen
+            }
+            console.log('Gefundener Standort:', standort);
+
+            // Seriennummern extrahieren (verschiedene Formate)
+            const serialNumbers = [];
+            // Pattern 1: "S/N: XXXXX" oder "S/N XXXXX"
+            const snMatches = body.matchAll(/S\/N[:\s]+([A-Z0-9\-]+)/gi);
+            for (const match of snMatches) {
+                if (match[1] && match[1].length >= 4 && !serialNumbers.includes(match[1])) {
+                    serialNumbers.push(match[1]);
+                }
+            }
+            // Pattern 2: "Seriennummer: XXXXX" oder "Seriennummer XXXXX"
+            const serienMatches = body.matchAll(/Seriennummer[:\s]+([A-Z0-9\-]+)/gi);
+            for (const match of serienMatches) {
+                if (match[1] && match[1].length >= 4 && !serialNumbers.includes(match[1])) {
+                    serialNumbers.push(match[1]);
+                }
+            }
+            // Pattern 3: "Serial: XXXXX" oder "Serial Number: XXXXX"
+            const serialMatches = body.matchAll(/Serial(?:\s+Number)?[:\s]+([A-Z0-9\-]+)/gi);
+            for (const match of serialMatches) {
+                if (match[1] && match[1].length >= 4 && !serialNumbers.includes(match[1])) {
+                    serialNumbers.push(match[1]);
+                }
+            }
+            console.log('Gefundene Seriennummern:', serialNumbers);
+
             // 1. Zuerst echte Produktnamen aus E-Mail-Verlauf extrahieren
             // Pattern: "Storage 1: Seagate 4825..." oder "Server 1: Dell PowerEdge..."
             const productMappings = {};
@@ -1136,7 +1170,7 @@
                 }
             }
 
-            return { products, reference };
+            return { products, reference, standort, serialNumbers };
         }
 
         // Hersteller aus Produktname extrahieren
@@ -1164,6 +1198,10 @@
             return 'Sonstiges';
         }
 
+        // Variablen fuer geparste E-Mail-Daten
+        let parsedStandort = '';
+        let parsedSerialNumbers = [];
+
         document.getElementById('axians-email-process').addEventListener('click', async () => {
             const file = fileInput.files[0];
             if (!file) {
@@ -1173,13 +1211,27 @@
 
             try {
                 const emailData = await readMsgFile(file);
-                const { products, reference } = parseAxiansEmail(emailData.body, emailData.subject);
+                const { products, reference, standort, serialNumbers } = parseAxiansEmail(emailData.body, emailData.subject);
+
+                // Geparste Daten speichern
+                parsedStandort = standort;
+                parsedSerialNumbers = serialNumbers;
 
                 // Info anzeigen
                 document.getElementById('axians-email-info').style.display = 'block';
                 document.getElementById('axians-email-subject').textContent = 'Betreff: ' + emailData.subject;
                 document.getElementById('axians-email-reference').textContent = 'Referenz: ' + (reference || 'Nicht gefunden');
                 document.getElementById('axians-email-date').textContent = 'Von: ' + emailData.from;
+
+                // Standort in das Country-Feld eintragen (wenn gefunden)
+                if (standort) {
+                    document.getElementById('axians-email-country').value = standort;
+                }
+
+                // Seriennummern anzeigen (wenn gefunden)
+                if (serialNumbers.length > 0) {
+                    document.getElementById('axians-email-date').textContent += ' | S/N: ' + serialNumbers.join(', ');
+                }
 
                 if (products.length === 0) {
                     alert('Keine Produkte in der E-Mail gefunden. Bitte prüfen Sie, ob es sich um eine Axians-Angebots-E-Mail handelt.');
@@ -1234,6 +1286,12 @@
                 );
 
                 if (!isDuplicate) {
+                    // Description mit Seriennummern erstellen
+                    const snText = parsedSerialNumbers.length > 0
+                        ? parsedSerialNumbers.join(', ')
+                        : '';
+                    const description = `S/N: ${snText}\nService Start: tba\nService Ende: tba`;
+
                     cart.push({
                         name: product.name,
                         active: 1,
@@ -1243,7 +1301,7 @@
                         unitPrice,
                         qtyInStock: 999,
                         handler: 'Team Wartung',
-                        description: 'S/N:\nService Start: tba\nService Ende: tba',
+                        description: description,
                         purchaseCost,
                         sla: product.sla,
                         country,
