@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.10.3
+// @version      1.10.4
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -15,6 +15,9 @@
 
 (function() {
     'use strict';
+
+    const SCRIPT_VERSION = '1.10.4';
+    console.log('[Products Importer] Version ' + SCRIPT_VERSION + ' geladen');
 
     // PDF.js Worker konfigurieren
     if (typeof pdfjsLib !== 'undefined') {
@@ -198,7 +201,7 @@
         <div id="importer-modal-overlay">
             <div id="importer-modal">
                 <div id="importer-modal-header">
-                    <h2>Products Importer</h2>
+                    <h2>Products Importer <span id="importer-version" style="font-size:11px;color:#888;font-weight:normal;"></span></h2>
                     <button id="importer-modal-close">&times;</button>
                 </div>
                 <div id="importer-tabs">
@@ -238,6 +241,12 @@
 
     // Modal einfuegen
     document.body.insertAdjacentHTML('beforeend', modalHTML);
+
+    // Version im Header anzeigen
+    const versionSpan = document.getElementById('importer-version');
+    if (versionSpan) {
+        versionSpan.textContent = 'v' + SCRIPT_VERSION;
+    }
 
     // ============================================
     // FLOATING BUTTON (nur im Products-Modul)
@@ -570,23 +579,21 @@
                     console.log('MsgReader methods:', Object.getOwnPropertyNames(Object.getPrototypeOf(msgReader)));
                     console.log('MsgReader own keys:', Object.keys(msgReader));
 
-                    // Versuche verschiedene Body-Formate
-                    const possibleBodyProps = ['body', 'bodyHTML', 'bodyRtf', 'bodyText', 'htmlBody', 'rtfBody', 'compressedRtf'];
-                    for (const prop of possibleBodyProps) {
-                        if (fileData[prop]) {
-                            console.log(`fileData.${prop} exists:`, typeof fileData[prop], fileData[prop].length || fileData[prop].byteLength || 'N/A');
-                        }
-                        if (msgReader[prop]) {
-                            console.log(`msgReader.${prop} exists:`, typeof msgReader[prop]);
-                        }
+                    // Untersuche das ds (DataStream) Objekt
+                    if (msgReader.ds) {
+                        console.log('msgReader.ds keys:', Object.keys(msgReader.ds));
                     }
 
-                    // Pruefe ob getBody oder aehnliche Methoden existieren
-                    if (typeof msgReader.getBody === 'function') {
-                        console.log('msgReader.getBody():', msgReader.getBody());
-                    }
-                    if (typeof msgReader.getBodyHTML === 'function') {
-                        console.log('msgReader.getBodyHTML():', msgReader.getBodyHTML());
+                    // Untersuche fileData genauer
+                    if (msgReader.fileData) {
+                        console.log('msgReader.fileData keys:', Object.keys(msgReader.fileData));
+                        // Suche nach allen String-Properties mit Inhalt
+                        for (const key of Object.keys(msgReader.fileData)) {
+                            const val = msgReader.fileData[key];
+                            if (typeof val === 'string' && val.length > 50) {
+                                console.log(`msgReader.fileData.${key} (${val.length} chars):`, val.substring(0, 300));
+                            }
+                        }
                     }
                     console.log('========================');
 
@@ -609,27 +616,36 @@
                     if (fileData.attachments && fileData.attachments.length > 0) {
                         console.log('=== ATTACHMENTS DEBUG ===');
                         fileData.attachments.forEach((att, idx) => {
-                            console.log(`Attachment ${idx}:`, {
-                                fileName: att.fileName,
-                                contentLength: att.content ? (att.content.length || att.content.byteLength) : 0,
-                                allKeys: Object.keys(att)
-                            });
-                            // Wenn Attachment Text-Content hat, zeige Vorschau
-                            if (att.content && typeof att.content === 'string') {
-                                console.log(`  Content (string):`, att.content.substring(0, 500));
-                            } else if (att.content && (att.content instanceof Uint8Array || att.content.length)) {
-                                // Versuche als Text zu dekodieren
-                                try {
-                                    const decoder = new TextDecoder('utf-8');
-                                    const text = decoder.decode(att.content.slice ? att.content.slice(0, 1000) : new Uint8Array(att.content).slice(0, 1000));
-                                    console.log(`  Content (decoded):`, text.substring(0, 500));
-                                } catch (e) {
-                                    console.log(`  Content: binary, nicht dekodierbar`);
+                            console.log(`Attachment ${idx} - ALLE KEYS:`, att);
+                            // Versuche Attachment-Content zu laden
+                            try {
+                                const attContent = msgReader.getAttachment(idx);
+                                if (attContent) {
+                                    console.log(`  getAttachment(${idx}):`, {
+                                        keys: Object.keys(attContent),
+                                        contentLength: attContent.content ? attContent.content.length : 0
+                                    });
                                 }
+                            } catch (e) {
+                                console.log(`  getAttachment(${idx}) error:`, e.message);
                             }
                         });
                         console.log('=========================');
                     }
+
+                    // Suche nach eingebetteten Nachrichten oder RTF-Body
+                    console.log('=== SUCHE NACH BODY-ALTERNATIVEN ===');
+                    // Manchmal ist der Body im RTF-Format komprimiert
+                    if (fileData.body && typeof fileData.body === 'object') {
+                        console.log('Body ist ein Objekt mit Keys:', Object.keys(fileData.body));
+                        // Versuche alle numerischen Indizes zu lesen
+                        const bodyBytes = [];
+                        for (let i = 0; i < 100 && fileData.body[i] !== undefined; i++) {
+                            bodyBytes.push(fileData.body[i]);
+                        }
+                        console.log('Body bytes (erste 100):', bodyBytes);
+                    }
+                    console.log('=====================================');
                     console.log('==========================');
 
                     // E-Mail-Daten extrahieren (mit Typ-Pruefung)
