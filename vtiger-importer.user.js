@@ -582,12 +582,13 @@
             return null;
         }
 
-        // LZFu Dekompression
-        const prebuf = "{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\fswiss \\fmodern \\fscript \\fdecor MS Sans SesriffSymbolArialTimes New RssmanCoupsriereBook Antiqua;}{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\f0\\fs20\\b\\i\\u\\tab\\tx";
+        // LZFu Dekompression (MS-OXRTFCP Spezifikation)
+        // Prebuffer: Standard-RTF-Header der im Dictionary vorinitialisiert ist
+        const prebuf = "{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\fswiss \\fmodern \\fscript \\fdecor MS Sans SerifSymbolArialTimes New RomanCourierBook Antiqua;}{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\f0\\fs20\\b\\i\\u\\tab\\tx";
         const dict = new Uint8Array(4096);
-        const encoder = new TextEncoder();
-        const prebufBytes = encoder.encode(prebuf);
-        dict.set(prebufBytes.slice(0, Math.min(prebufBytes.length, 207)));
+        for (let i = 0; i < prebuf.length && i < 207; i++) {
+            dict[i] = prebuf.charCodeAt(i);
+        }
 
         let dictWritePos = 207;
         let inPos = 16;
@@ -597,13 +598,21 @@
             while (inPos < compressedData.length && output.length < rawSize) {
                 const flags = compressedData[inPos++];
                 for (let i = 0; i < 8 && inPos < compressedData.length && output.length < rawSize; i++) {
-                    if (flags & (1 << i)) {
-                        // Referenz (2 Bytes)
+                    const isRef = (flags & (1 << i)) === 0; // Bit=0 bedeutet Referenz!
+
+                    if (isRef) {
+                        // Dictionary-Referenz (2 Bytes)
                         if (inPos + 1 >= compressedData.length) break;
                         const ref1 = compressedData[inPos++];
                         const ref2 = compressedData[inPos++];
                         const offset = (ref1 << 4) | (ref2 >> 4);
                         const length = (ref2 & 0x0F) + 2;
+
+                        // Pruefe auf End-Marker (offset zeigt auf dictWritePos)
+                        if (offset === dictWritePos) {
+                            console.log('RTF End-Marker erreicht bei Position', inPos);
+                            return new TextDecoder('windows-1252').decode(new Uint8Array(output));
+                        }
 
                         for (let j = 0; j < length && output.length < rawSize; j++) {
                             const byte = dict[(offset + j) % 4096];
@@ -612,7 +621,7 @@
                             dictWritePos = (dictWritePos + 1) % 4096;
                         }
                     } else {
-                        // Literal Byte
+                        // Literal Byte (Bit=1)
                         const byte = compressedData[inPos++];
                         output.push(byte);
                         dict[dictWritePos] = byte;
@@ -628,22 +637,78 @@
         return decoder.decode(new Uint8Array(output));
     }
 
-    // RTF zu Plaintext konvertieren
+    // RTF zu Plaintext konvertieren (unterstuetzt auch encapsulated HTML)
     function rtfToText(rtf) {
         if (!rtf || typeof rtf !== 'string') return '';
 
+        // Pruefe ob es encapsulated HTML ist (\fromhtml1)
+        const isEncapsulatedHtml = rtf.includes('\\fromhtml');
+
+        if (isEncapsulatedHtml) {
+            console.log('RTF enthaelt encapsulated HTML, extrahiere...');
+            // Bei encapsulated HTML: Entferne \htmlrtf...\htmlrtf0 Bloecke (RTF-only content)
+            let html = rtf;
+
+            // Entferne RTF-Header bis zum Body
+            html = html.replace(/^\{\\rtf1[^}]*\}?/i, '');
+
+            // Entferne \htmlrtf ... \htmlrtf0 Bloecke (RTF-spezifischer Content)
+            html = html.replace(/\\htmlrtf[^0][^\\]*\\htmlrtf0\s?/gi, '');
+            html = html.replace(/\\htmlrtf\s?/gi, '');
+            html = html.replace(/\\htmlrtf0\s?/gi, '');
+
+            // Konvertiere RTF-Escapes
+            html = html.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
+            html = html.replace(/\\u([0-9]+)\??/gi, (m, code) => String.fromCharCode(parseInt(code)));
+
+            // Entferne verbleibende RTF Control Words
+            html = html.replace(/\\par\b\s?/gi, '\n');
+            html = html.replace(/\\line\b\s?/gi, '\n');
+            html = html.replace(/\\tab\b\s?/gi, '\t');
+            html = html.replace(/\\\{/g, '{');
+            html = html.replace(/\\\}/g, '}');
+            html = html.replace(/\\\\/g, '\\');
+            html = html.replace(/\\[a-z0-9*-]+\s?/gi, '');
+            html = html.replace(/[{}]/g, '');
+
+            // Jetzt haben wir HTML - konvertiere zu Text
+            // Ersetze HTML-Elemente durch Struktur
+            html = html.replace(/<br\s*\/?>/gi, '\n');
+            html = html.replace(/<\/tr>/gi, '\n');
+            html = html.replace(/<\/p>/gi, '\n');
+            html = html.replace(/<\/div>/gi, '\n');
+            html = html.replace(/<\/td>/gi, '\t');
+            html = html.replace(/<\/th>/gi, '\t');
+            html = html.replace(/<[^>]+>/g, ''); // Alle HTML-Tags entfernen
+
+            // HTML-Entities dekodieren
+            html = html.replace(/&nbsp;/gi, ' ');
+            html = html.replace(/&amp;/gi, '&');
+            html = html.replace(/&lt;/gi, '<');
+            html = html.replace(/&gt;/gi, '>');
+            html = html.replace(/&quot;/gi, '"');
+            html = html.replace(/&#(\d+);/g, (m, code) => String.fromCharCode(parseInt(code)));
+
+            // Bereinigen
+            html = html.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+            html = html.replace(/[ \t]+/g, ' ');
+            html = html.replace(/\n +/g, '\n');
+            html = html.replace(/ +\n/g, '\n');
+            html = html.replace(/\n{3,}/g, '\n\n');
+
+            return html.trim();
+        }
+
+        // Normales RTF ohne HTML
         let text = rtf;
-        // RTF Control Words entfernen
         text = text.replace(/\\par\b/gi, '\n');
         text = text.replace(/\\line\b/gi, '\n');
         text = text.replace(/\\tab\b/gi, '\t');
         text = text.replace(/\\'([0-9a-f]{2})/gi, (m, hex) => String.fromCharCode(parseInt(hex, 16)));
         text = text.replace(/\\u([0-9]+)\??/gi, (m, code) => String.fromCharCode(parseInt(code)));
-        // Gruppen und Control Words entfernen
         text = text.replace(/\{[^{}]*\}/g, '');
         text = text.replace(/\\[a-z0-9*-]+\s?/gi, '');
         text = text.replace(/[{}]/g, '');
-        // Bereinigen
         text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         text = text.replace(/\n{3,}/g, '\n\n');
         return text.trim();
