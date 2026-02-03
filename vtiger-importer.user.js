@@ -580,6 +580,31 @@
                             console.log(`${key} (${typeof val}):`, val);
                         }
                     }
+                    // DEBUG: Zeige Attachment-Details
+                    if (fileData.attachments && fileData.attachments.length > 0) {
+                        console.log('=== ATTACHMENTS DEBUG ===');
+                        fileData.attachments.forEach((att, idx) => {
+                            console.log(`Attachment ${idx}:`, {
+                                fileName: att.fileName,
+                                contentLength: att.content ? (att.content.length || att.content.byteLength) : 0,
+                                allKeys: Object.keys(att)
+                            });
+                            // Wenn Attachment Text-Content hat, zeige Vorschau
+                            if (att.content && typeof att.content === 'string') {
+                                console.log(`  Content (string):`, att.content.substring(0, 500));
+                            } else if (att.content && (att.content instanceof Uint8Array || att.content.length)) {
+                                // Versuche als Text zu dekodieren
+                                try {
+                                    const decoder = new TextDecoder('utf-8');
+                                    const text = decoder.decode(att.content.slice ? att.content.slice(0, 1000) : new Uint8Array(att.content).slice(0, 1000));
+                                    console.log(`  Content (decoded):`, text.substring(0, 500));
+                                } catch (e) {
+                                    console.log(`  Content: binary, nicht dekodierbar`);
+                                }
+                            }
+                        });
+                        console.log('=========================');
+                    }
                     console.log('==========================');
 
                     // E-Mail-Daten extrahieren (mit Typ-Pruefung)
