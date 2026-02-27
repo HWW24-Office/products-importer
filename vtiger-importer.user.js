@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         VTiger Products Importer
 // @namespace    https://vtiger.hardwarewartung.com
-// @version      1.11.1
+// @version      1.11.2
 // @description  Import-Tools fuer Axians, Parkplace, Technogroup direkt in VTiger
 // @author       Hardwarewartung
 // @match        https://vtiger.hardwarewartung.com/*
@@ -3009,7 +3009,7 @@
             const dtStart = new Date(`${y1}-${m1}-${d1}`);
             const dtEnd = new Date(`${y2}-${m2}-${d2}`);
             let months = (dtEnd.getFullYear() - dtStart.getFullYear()) * 12 + (dtEnd.getMonth() - dtStart.getMonth());
-            if (dtEnd.getDate() >= 15) months++;
+            // Fix: Kein +1 mehr - Wartungsverträge: Start Tag X, Ende Tag X-1 = volle Laufzeit
             return months > 0 ? months : 1;
         }
 
@@ -3232,7 +3232,7 @@
             const dtStart = new Date(`${y1}-${m1}-${d1}`);
             const dtEnd = new Date(`${y2}-${m2}-${d2}`);
             let months = (dtEnd.getFullYear() - dtStart.getFullYear()) * 12 + (dtEnd.getMonth() - dtStart.getMonth());
-            if (dtEnd.getDate() >= 15) months++;
+            // Fix: Kein +1 mehr - Wartungsverträge: Start Tag X, Ende Tag X-1 = volle Laufzeit
             return months;
         }
 
@@ -3783,7 +3783,7 @@
             const dtEnd = new Date(`${y2}-${m2}-${d2}`);
             if (isNaN(dtStart) || isNaN(dtEnd)) return 12;
             let months = (dtEnd.getFullYear() - dtStart.getFullYear()) * 12 + (dtEnd.getMonth() - dtStart.getMonth());
-            if (dtEnd.getDate() >= 15) months++;
+            // Fix: Kein +1 mehr - Wartungsverträge: Start Tag X, Ende Tag X-1 = volle Laufzeit
             return months > 0 ? months : 1;
         }
 
@@ -4001,7 +4001,8 @@
                 // Berechne Dauer in Monaten
                 const [d1, m1, y1] = serviceStart.split('.').map(Number);
                 const [d2, m2, y2] = serviceEnde.split('.').map(Number);
-                globalDuration = (y2 - y1) * 12 + (m2 - m1) + (d2 >= d1 ? 1 : 0);
+                // Fix: Kein +1 mehr - Wartungsverträge: Start Tag X, Ende Tag X-1 = volle Laufzeit
+                globalDuration = (y2 - y1) * 12 + (m2 - m1);
                 if (globalDuration <= 0) globalDuration = 12;
             } else {
                 // Fallback: "Laufzeit: X Monate"
